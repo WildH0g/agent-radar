@@ -155,11 +155,16 @@ start() {
     fi
 
     pid_set "$$"
-    trap 'pid_unset "$$"; exit 0' INT TERM HUP
+    trap 'pid_unset "$$"; exit 0' INT TERM HUP EXIT
 
-    while tmux display-message -p '#{pid}' >/dev/null 2>&1; do
+    # ponytail: list-sessions only needs the server, not an attached client;
+    # display-message failed whenever every client briefly detached, ending
+    # the daemon for good with no error.
+    while tmux list-sessions >/dev/null 2>&1; do
         started=$(date +%s)
-        poll_once
+        # ponytail: don't let one bad cycle (a pane closing mid-poll, a
+        # transient tmux/ps hiccup) kill the whole daemon under set -e.
+        poll_once || true
         interval=$(opt @agent-radar-poll-interval 2)
         valid_number "$interval" || interval=2
         elapsed=$(($(date +%s) - started))
