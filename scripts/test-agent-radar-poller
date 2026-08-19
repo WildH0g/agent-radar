@@ -4,7 +4,8 @@ set -eu
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
 poller=$script_dir/agent-radar-poller
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-poller-test.XXXXXX") || exit 1
-trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+dead_job_pid=
+trap '[ -n "${dead_job_pid:-}" ] && kill "$dead_job_pid" 2>/dev/null; rm -rf "$tmp"' EXIT INT TERM HUP
 
 fixture=$tmp/env
 log=$tmp/tmux.log
@@ -52,5 +53,160 @@ if grep -F 'TMUX_AGENT_RADAR_PANE_%1_STATE=stopped' "$log" >/dev/null; then
     echo 'opencode square bar was classified stopped' >&2
     exit 1
 fi
+
+# --- start(): takes over when @agent-radar-pid is stale (e.g. a SIGKILL
+# left no live owner behind — nothing can trap that) ---
+dead=$tmp/dead
+mkdir "$dead" "$dead/bin"
+dead_store=$dead/store
+: > "$dead_store"
+pidfile=$dead/pid
+dead_pid=999999999
+printf '%s\n' "$dead_pid" > "$pidfile"
+
+cat > "$dead/bin/tmux" <<EOF
+#!/usr/bin/env sh
+case "\$1" in
+    show-option)
+        case "\$3" in
+            @agent-radar-pid) cat "$pidfile" 2>/dev/null ;;
+            @agent-radar-poll-interval) printf '0\n' ;;
+            *) exit 0 ;;
+        esac
+        ;;
+    set-option)
+        case "\$2" in
+            -gqu) : > "$pidfile" ;;
+            *) printf '%s\n' "\$4" > "$pidfile" ;;
+        esac
+        ;;
+    list-sessions) exit 0 ;;
+    list-panes) exit 0 ;;
+    *) echo "unexpected tmux \$*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$dead/bin/tmux"
+
+PATH=$dead/bin:$PATH AGENT_RADAR_STORE_FILE=$dead_store "$poller" start &
+dead_job_pid=$!
+
+new_pid=
+tries=0
+while [ "$tries" -lt 50 ]; do
+    candidate=$(cat "$pidfile" 2>/dev/null || true)
+    if [ -n "$candidate" ] && [ "$candidate" != "$dead_pid" ]; then
+        new_pid=$candidate
+        break
+    fi
+    tries=$((tries + 1))
+    sleep 0.1
+done
+
+[ -n "$new_pid" ] || { echo 'start() never took over a dead pid' >&2; exit 1; }
+kill -0 "$new_pid" 2>/dev/null || { echo 'start() recorded a pid that is not actually running' >&2; exit 1; }
+
+kill "$new_pid" 2>/dev/null || true
+tries=0
+while [ "$tries" -lt 50 ] && [ -s "$pidfile" ]; do
+    tries=$((tries + 1))
+    sleep 0.1
+done
+[ -s "$pidfile" ] && { echo 'start() left @agent-radar-pid set after being stopped' >&2; exit 1; }
+dead_job_pid=
+
+# --- start(): a takeover race loser steps aside instead of running forever
+# alongside the winner (start()'s dead-pid check-then-set isn't atomic) ---
+race=$tmp/race
+mkdir "$race" "$race/bin"
+race_store=$race/store
+: > "$race_store"
+race_pidfile=$race/pid
+race_dead_pid=999999998
+printf '%s\n' "$race_dead_pid" > "$race_pidfile"
+
+cat > "$race/bin/tmux" <<EOF
+#!/usr/bin/env sh
+case "\$1" in
+    show-option)
+        case "\$3" in
+            @agent-radar-pid) cat "$race_pidfile" 2>/dev/null ;;
+            @agent-radar-poll-interval) printf '0\n' ;;
+            *) exit 0 ;;
+        esac
+        ;;
+    set-option)
+        case "\$2" in
+            -gqu) : > "$race_pidfile" ;;
+            *) printf '%s\n' "\$4" > "$race_pidfile" ;;
+        esac
+        ;;
+    list-sessions) exit 0 ;;
+    list-panes) exit 0 ;;
+    *) echo "unexpected tmux \$*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$race/bin/tmux"
+
+PATH=$race/bin:$PATH AGENT_RADAR_STORE_FILE=$race_store "$poller" start &
+dead_job_pid=$!
+
+loser_pid=
+tries=0
+while [ "$tries" -lt 50 ]; do
+    candidate=$(cat "$race_pidfile" 2>/dev/null || true)
+    if [ -n "$candidate" ] && [ "$candidate" != "$race_dead_pid" ]; then
+        loser_pid=$candidate
+        break
+    fi
+    tries=$((tries + 1))
+    sleep 0.1
+done
+[ -n "$loser_pid" ] || { echo 'start() never took over in the race setup' >&2; exit 1; }
+
+# Simulate a second racer winning the takeover out from under the running loop.
+winner_pid=424242
+printf '%s\n' "$winner_pid" > "$race_pidfile"
+
+tries=0
+while [ "$tries" -lt 50 ]; do
+    kill -0 "$loser_pid" 2>/dev/null || break
+    tries=$((tries + 1))
+    sleep 0.1
+done
+if kill -0 "$loser_pid" 2>/dev/null; then
+    echo 'start() kept running after losing ownership' >&2
+    kill "$loser_pid" 2>/dev/null || true
+    exit 1
+fi
+
+current=$(cat "$race_pidfile")
+[ "$current" = "$winner_pid" ] || { echo "the loser clobbered the winner's pid on its way out" >&2; exit 1; }
+dead_job_pid=
+
+# --- start(): no-ops (no duplicate daemon) when the recorded pid is alive ---
+alive=$tmp/alive
+mkdir "$alive" "$alive/bin"
+alive_store=$alive/store
+: > "$alive_store"
+alive_pidfile=$alive/pid
+printf '%s\n' "$$" > "$alive_pidfile"
+
+cat > "$alive/bin/tmux" <<EOF
+#!/usr/bin/env sh
+case "\$1" in
+    show-option)
+        case "\$3" in
+            @agent-radar-pid) cat "$alive_pidfile" 2>/dev/null ;;
+            *) exit 0 ;;
+        esac
+        ;;
+    *) echo "unexpected tmux \$*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$alive/bin/tmux"
+
+PATH=$alive/bin:$PATH AGENT_RADAR_STORE_FILE=$alive_store "$poller" start
+current=$(cat "$alive_pidfile")
+[ "$current" = "$$" ] || { echo 'start() overwrote a pid that was already alive (spawned a duplicate)' >&2; exit 1; }
 
 printf 'agent-radar-poller ok\n'

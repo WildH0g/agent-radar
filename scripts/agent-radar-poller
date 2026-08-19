@@ -161,6 +161,13 @@ start() {
     # display-message failed whenever every client briefly detached, ending
     # the daemon for good with no error.
     while tmux list-sessions >/dev/null 2>&1; do
+        # ponytail: the dead-pid takeover above isn't atomic (read, then a
+        # separate write) — a fast heartbeat re-invoking start() (see
+        # agent-radar-status) can fire two takeovers before the first
+        # write is visible to the second. Losing this check means someone
+        # else won since we set our own pid; step aside within one poll
+        # cycle instead of running forever alongside the winner.
+        [ "$(pid_val)" = "$$" ] || break
         started=$(date +%s)
         # ponytail: don't let one bad cycle (a pane closing mid-poll, a
         # transient tmux/ps hiccup) kill the whole daemon under set -e.
