@@ -6,6 +6,7 @@ tmux display-message -p '#{session_name}' >/dev/null 2>&1 || exit 0
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 0
 store_cmd=$script_dir/agent-radar-store
 classify_cmd=$script_dir/agent-radar-classify
+poller_cmd=$script_dir/agent-radar-poller
 
 current_session=${1:-}
 records=$(mktemp "${TMPDIR:-/tmp}/agent-radar-records.XXXXXX") || exit 1
@@ -18,6 +19,19 @@ opt() {
     v=$(tmux show-option -gqv "$1" 2>/dev/null || true)
     [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
 }
+
+# ponytail: a SIGKILL (or anything else a trap can't catch) leaves
+# @agent-radar-pid stale with no live owner, and nothing was re-invoking
+# start() to notice. start() already self-guards (kill -0: no-ops if a live
+# pid owns it, takes over if not), so reusing it here piggybacks self-healing
+# on the one heartbeat tmux drives on its own (status-interval) instead of
+# duplicating the liveness check. Checked locally first (no fork) so the
+# common healthy case doesn't pay for a run-shell -b + a whole sh startup
+# every single render — only fork agent-radar-poller when it's actually dead.
+poller_pid=$(tmux show-option -gqv @agent-radar-pid 2>/dev/null || true)
+if [ -z "$poller_pid" ] || ! kill -0 "$poller_pid" 2>/dev/null; then
+    tmux run-shell -b "$poller_cmd start" >/dev/null 2>&1 || true
+fi
 
 "$store_cmd" records > "$records"
 "$classify_cmd" < "$records" > "$rows"

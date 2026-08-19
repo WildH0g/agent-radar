@@ -48,6 +48,9 @@ case "$1" in
     set-environment)
         printf '%s\n' "$*" >> "$TMUX_LOG"
         ;;
+    run-shell)
+        printf '%s\n' "$*" >> "$TMUX_LOG"
+        ;;
     *) echo "unexpected tmux $*" >&2; exit 1 ;;
 esac
 EOF
@@ -56,6 +59,11 @@ chmod +x "$tmp/bin/tmux"
 PATH=$tmp/bin:$PATH AGENT_RADAR_STORE_FILE=$fixture TMUX_LOG=$log "$status" work > "$tmp/out"
 printf '#[fg=yellow][agents - work]#[default]' > "$tmp/expected-out"
 diff -u "$tmp/expected-out" "$tmp/out"
+
+grep -Fx "run-shell -b $script_dir/agent-radar-poller start" "$log" >/dev/null || {
+    echo 'poller heartbeat was not invoked' >&2
+    exit 1
+}
 
 grep -Fx 'set-window-option -t work:2 -q @agent-radar-window-stopped 1' "$log" >/dev/null || {
     echo 'unseen stopped window was not highlighted' >&2
@@ -67,6 +75,45 @@ if grep -F 'set-window-option -t work:3 -q @agent-radar-window-stopped 1' "$log"
 fi
 if grep -F 'set-window-option -t other:1 -q @agent-radar-window-stopped 1' "$log" >/dev/null; then
     echo 'running window was highlighted' >&2
+    exit 1
+fi
+
+# --- heartbeat: skipped (no fork) when a live pid already owns the poller ---
+test_pid=$$
+log2=$tmp/tmux2.log
+: > "$log2"
+mkdir "$tmp/bin2"
+cat > "$tmp/bin2/tmux" <<EOF
+#!/usr/bin/env sh
+case "\$1" in
+    display-message)
+        if [ "\$2" = -p ] && [ "\$3" = '#{session_name}' ]; then
+            printf 'work\n'
+            exit 0
+        fi
+        if [ "\$2" = -p ] && [ "\$3" = -t ] && [ "\$4" = work ] && [ "\$5" = '#{pane_id}' ]; then
+            printf '%%9\n'
+            exit 0
+        fi
+        echo "unexpected display-message \$*" >&2; exit 1
+        ;;
+    show-option)
+        [ "\$3" = '@agent-radar-pid' ] && printf '%s\n' "$test_pid" || exit 0
+        ;;
+    list-sessions) printf 'work\nother\n' ;;
+    list-windows) printf 'work:2\nwork:3\nother:1\n' ;;
+    set-window-option) printf '%s\n' "\$*" >> "$log2" ;;
+    set-environment) printf '%s\n' "\$*" >> "$log2" ;;
+    run-shell) printf '%s\n' "\$*" >> "$log2" ;;
+    *) echo "unexpected tmux \$*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$tmp/bin2/tmux"
+
+PATH=$tmp/bin2:$PATH AGENT_RADAR_STORE_FILE=$fixture TMUX_LOG=$log2 "$status" work > /dev/null
+
+if grep -q 'run-shell' "$log2"; then
+    echo 'poller heartbeat forked a run-shell even though a live pid owns it' >&2
     exit 1
 fi
 
