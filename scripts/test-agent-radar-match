@@ -6,12 +6,14 @@ matcher=$script_dir/agent-radar-match
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-match-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT INT TERM HUP
 
-pattern=$(printf '\342[\240-\243]|(\342\226\240|\342\254\235){4,}')
+pattern=$(printf '\342[\240-\243]|(\342\226\240|\342\254\235){4,}|msg=interrupt')
 
 printf 'thinking \342\240\201\n' > "$tmp/braille"
 printf '\342\254\235\342\226\240\342\226\240\342\254\235\n' > "$tmp/opencode"
 printf '\342\224\200\342\224\200\342\224\200\342\224\200\n' > "$tmp/box-drawing"
 printf 'transcript quotes "Working..." and "esc to interrupt"\n' > "$tmp/quoted-working"
+printf '\342\232\225 \342\235\257 msg=interrupt \302\267 /queue \302\267 /bg \302\267 /steer \302\267 Ctrl+C cancel\n' > "$tmp/hermes-running"
+printf ' \342\232\225 hermes \342\224\202 ctx -- \342\224\202 [\342\221\221\342\221\221\342\221\221\342\221\221\342\221\221\342\221\221\342\221\221\342\221\221\342\221\221\342\221\221] -- \342\224\202 1s \342\224\202 \342\217\262 0s\n\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\n\342\235\257 Find and fix a failing test\n' > "$tmp/hermes-idle"
 printf 'custom marker\n' > "$tmp/custom"
 
 assert_exit() {
@@ -35,6 +37,8 @@ assert_exit braille 0 "$pattern"
 assert_exit opencode 0 "$pattern"
 assert_exit box-drawing 1 "$pattern"
 assert_exit quoted-working 1 "$pattern"
+assert_exit hermes-running 0 "$pattern"
+assert_exit hermes-idle 1 "$pattern"
 assert_exit custom 0 'custom marker'
 
 printf 'agent-radar-match ok\n'

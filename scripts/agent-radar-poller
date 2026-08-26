@@ -61,11 +61,39 @@ agent_for_tty() {
     tty=${1#/dev/}
     allow=$2
 
-    ps -t "$tty" -o comm= 2>/dev/null | while IFS= read -r comm; do
+    # Match on the full command line, not just comm: hermes (and other
+    # python/node-launched harnesses) exec an interpreter — `/path/python
+    # /path/hermes` — so comm is `python` (or a truncated path), never the
+    # harness name. argv[0] covers native binaries; remaining args are only
+    # scanned for interpreter/launcher processes so a pane running
+    # `grep hermes` or `vim hermes` isn't mistaken for an agent pane.
+    ps -t "$tty" -o comm= -o args= 2>/dev/null | while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        comm=${line%% *}
         name=${comm##*/}
         name=${name#-}
         case "$allow" in
             *",$name,"*) printf '%s\n' "$name"; exit 0 ;;
+        esac
+
+        rest=${line#* }
+        set -- $rest
+        [ "$#" -gt 0 ] || continue
+        prog=${1##*/}
+        prog=${prog#-}
+        case "$allow" in
+            *",$prog,"*) printf '%s\n' "$prog"; exit 0 ;;
+        esac
+        case "$prog" in
+            python*|node|npx|bun|deno|ruby|perl|php|bash|sh|zsh|fish|dash|ksh|tcsh|pwsh|uv|uvx|pipx)
+                shift
+                for arg in "$@"; do
+                    aname=${arg##*/}
+                    case "$allow" in
+                        *",$aname,"*) printf '%s\n' "$aname"; exit 0 ;;
+                    esac
+                done
+                ;;
         esac
     done
 }
@@ -95,12 +123,13 @@ poll_once() {
     now=$(date +%s)
     idle=$(opt @agent-radar-idle-seconds 3)
     valid_number "$idle" || idle=3
-    allow=,$(opt @agent-radar-processes 'pi,claude,codex,opencode,aider,cursor'),
+    allow=,$(opt @agent-radar-processes 'pi,claude,codex,opencode,hermes,aider,cursor'),
     # Working-indicator pattern (ERE, matched byte-wise under LC_ALL=C). Default
     # matches the braille progress glyph (E2 A0-A3 xx = U+2800-U+28FF) that pi/
     # claude/codex animate, OR opencode's 4+-long square progress bar (U+25A0/
-    # U+2B1D); neither appears in quoted transcript text.
-    work_re=$(opt @agent-radar-working-pattern "$(printf '\342[\240-\243]|(\342\226\240|\342\254\235){4,}')")
+    # U+2B1D), OR hermes' prompt-line running hint (msg=interrupt, shown only
+    # while a turn is in flight); none appear in quoted transcript text.
+    work_re=$(opt @agent-radar-working-pattern "$(printf '\342[\240-\243]|(\342\226\240|\342\254\235){4,}|msg=interrupt')")
     present_panes=$(mktemp "${TMPDIR:-/tmp}/agent-radar.XXXXXX") || exit 1
     records_file=$(mktemp "${TMPDIR:-/tmp}/agent-radar-records.XXXXXX") || exit 1
     "$store_cmd" records > "$records_file"

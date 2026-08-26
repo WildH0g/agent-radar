@@ -7,7 +7,8 @@ the moment one stops needing to work, and jumps you to the exact pane it lives i
 
 **Agent pane**:
 A tmux pane whose foreground process is an allowlisted coding-agent executable
-(`pi`, `claude`, `codex`, …). The unit agent-radar tracks and navigates to.
+(`pi`, `claude`, `codex`, `hermes`, …). The unit agent-radar tracks and
+navigates to.
 _Avoid_: session, window (an agent lives in a specific pane, not a whole session)
 
 **Target**:
@@ -16,10 +17,11 @@ navigator jumps to and what agents are sorted by alphabetically.
 _Avoid_: location, path
 
 **Working indicator**:
-The live animated marker a harness paints while working — a braille progress
-glyph (pi/claude/codex) or a pulsing square progress bar (opencode). The one
-positive signal agent-radar keys off; it only exists while the harness animates
-it, so it can't be faked by quoted transcript text.
+The live marker a harness paints while working — a braille progress glyph
+(pi/claude/codex), a pulsing square progress bar (opencode), or the running
+hint on hermes' prompt line (`msg=interrupt`). The one positive signal
+agent-radar keys off; it only exists while the harness is working, so it can't
+be faked by quoted transcript text.
 _Avoid_: harness-specific names as generic terms
 
 **Working**:

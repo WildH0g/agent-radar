@@ -2,8 +2,9 @@
 
 The poller decides "working vs stopped" by matching the live working indicator
 in each pane's plain `capture-pane` output (`detect_working`, pattern
-`@agent-radar-working-pattern`, default the U+2800–U+28FF braille glyph or
-opencode's 4+-square progress bar), **not** by hashing the captured screen and
+`@agent-radar-working-pattern`, default the U+2800–U+28FF braille glyph,
+opencode's 4+-square progress bar, or hermes' prompt-line running hint
+`msg=interrupt`), **not** by hashing the captured screen and
 watching for change — which is what the original charting (map.md, ticket
 002/003) settled on.
 
@@ -23,10 +24,14 @@ text. Matched byte-wise under `LC_ALL=C`, the default is locale-proof.
 
 ## Cost and the calibration knob
 
-This is harness-specific: an agent whose working indicator is neither braille
-nor opencode's square bar won't be detected. That's the physical-world tuning
-knob, kept as `@agent-radar-working-pattern` — override it with the harness's
-own marker.
+This is harness-specific: an agent whose working indicator is neither braille,
+opencode's square bar, nor hermes' prompt-line hint won't be detected. That's
+the physical-world tuning knob, kept as `@agent-radar-working-pattern` —
+override it with the harness's own marker. (hermes' hint is static rather than
+animated, but the same trick applies: it exists only while a turn is in
+flight, so it can't be faked by quoted transcript text — and it can't be
+confused with hermes' always-present `⚕` branding, which shows up in both
+working and idle states.)
 
 ## Status of the original decision
 
