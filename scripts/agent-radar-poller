@@ -6,6 +6,7 @@ script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 0
 store_cmd=$script_dir/agent-radar-store
 transition_cmd=$script_dir/agent-radar-transition
 match_cmd=$script_dir/agent-radar-match
+throttle_file="${AGENT_RADAR_SOUND_THROTTLE_FILE:-}"
 . "$script_dir/agent-radar-record-columns"
 eval "$(agent_radar_record_column_vars)"
 
@@ -105,11 +106,37 @@ on run argv
   display notification (item 2 of argv) with title ("agent-radar: " & item 1 of argv & " stopped")
 end run
 APPLESCRIPT
+    elif command -v notify-send >/dev/null 2>&1; then
+        notify-send "agent-radar: $1 stopped" "$2" >/dev/null 2>&1 &
+    fi
+
+    [ "$(opt @agent-radar-sound on)" = on ] || return 0
+
+    if [ -n "$throttle_file" ]; then
+        last_sound=$(stat -c %Y "$throttle_file" 2>/dev/null || stat -f %m "$throttle_file" 2>/dev/null || true)
+        if [ -n "$last_sound" ]; then
+            elapsed=$(($(date +%s) - last_sound))
+            if [ "$elapsed" -lt 3 ]; then
+                return 0
+            fi
+        fi
+        touch "$throttle_file" 2>/dev/null || true
+    fi
+
+    if [ "$(uname -s 2>/dev/null || true)" = Darwin ] && command -v afplay >/dev/null 2>&1; then
+        afplay /System/Library/Sounds/Ping.aiff >/dev/null 2>&1 &
         return 0
     fi
 
-    command -v notify-send >/dev/null 2>&1 || return 0
-    notify-send "agent-radar: $1 stopped" "$2" >/dev/null 2>&1 &
+    if command -v canberra-gtk-play >/dev/null 2>&1; then
+        canberra-gtk-play -i complete >/dev/null 2>&1 &
+        return 0
+    elif command -v paplay >/dev/null 2>&1; then
+        paplay /usr/share/sounds/freedesktop/stereo/complete.oga >/dev/null 2>&1 &
+        return 0
+    fi
+
+    return 0
 }
 
 valid_number() {
@@ -184,7 +211,10 @@ start() {
     fi
 
     pid_set "$$"
-    trap 'pid_unset "$$"; exit 0' INT TERM HUP EXIT
+    if [ -z "$throttle_file" ]; then
+        throttle_file=$(mktemp "${TMPDIR:-/tmp}/agent-radar-sound-throttle.XXXXXX") || exit 1
+    fi
+    trap 'rm -f "$throttle_file"; pid_unset "$$"; exit 0' INT TERM HUP EXIT
 
     # ponytail: list-sessions only needs the server, not an attached client;
     # display-message failed whenever every client briefly detached, ending

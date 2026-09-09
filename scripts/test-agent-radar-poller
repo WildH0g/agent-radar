@@ -227,4 +227,194 @@ PATH=$alive/bin:$PATH AGENT_RADAR_STORE_FILE=$alive_store "$poller" start
 current=$(cat "$alive_pidfile")
 [ "$current" = "$$" ] || { echo 'start() overwrote a pid that was already alive (spawned a duplicate)' >&2; exit 1; }
 
+# --- Sound cue tests --------------------------------------------------------
+
+sound=$tmp/sound
+mkdir -p "$sound/bin"
+
+# Provide a private PATH so host binaries (e.g. /usr/bin/canberra-gtk-play)
+# do not leak into the sound-player probes.
+for _tool in awk cat cut date dirname grep mktemp rm sort stat touch tr sh; do
+    ln -s "$(command -v "$_tool")" "$sound/bin/$_tool"
+done
+rm -f "$sound/bin/tmux" "$sound/bin/ps" "$sound/bin/uname" "$sound/bin/notify-send"
+
+sound_fixture=$sound/fixture
+cat > "$sound_fixture" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%1_AGENT=opencode
+TMUX_AGENT_RADAR_PANE_%1_TARGET=test:1.0
+TMUX_AGENT_RADAR_PANE_%1_LAST_CHANGE=100
+TMUX_AGENT_RADAR_PANE_%1_ARMED=1
+TMUX_AGENT_RADAR_PANE_%1_STATE=working
+TMUX_AGENT_RADAR_PANE_%1_STOPPED_AT=
+EOF
+
+cat > "$sound/bin/ps" <<'EOF'
+#!/usr/bin/env sh
+case "$1 $2 $3 $4 $5 $6" in
+    '-t ttys001 -o comm= -o args=') printf '%s\n' 'opencode /usr/local/bin/opencode' ;;
+    *) echo "unexpected ps $*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$sound/bin/ps"
+
+cat > "$sound/bin/notify-send" <<'EOF'
+#!/usr/bin/env sh
+:
+EOF
+chmod +x "$sound/bin/notify-send"
+
+write_tmux_mock() {
+    _sound_value=$1
+    cat > "$sound/bin/tmux" <<EOF
+#!/usr/bin/env sh
+case "\$1" in
+    show-option)
+        case "\$3" in
+            @agent-radar-sound) printf '$_sound_value\n' ;;
+            @agent-radar-idle-seconds) printf '3\n' ;;
+            @agent-radar-poll-interval) printf '2\n' ;;
+            @agent-radar-processes) printf 'pi,claude,codex,opencode,hermes,aider,cursor\n' ;;
+            *) exit 0 ;;
+        esac
+        ;;
+    list-panes) printf '%%1|test:1.0|/dev/ttys001\n' ;;
+    capture-pane)
+        [ "\$1 \$2 \$3" = 'capture-pane -pJ -t' ] || { echo "unexpected capture-pane args: \$*" >&2; exit 1; }
+        case "\$4" in
+            %1) printf 'done\n' ;;
+            *) echo "unexpected capture-pane target: \$*" >&2; exit 1 ;;
+        esac
+        ;;
+    set-environment) : ;;
+    *) echo "unexpected tmux \$*" >&2; exit 1 ;;
+esac
+EOF
+    chmod +x "$sound/bin/tmux"
+}
+
+afplay_log=$sound/afplay.log
+canberra_log=$sound/canberra.log
+paplay_log=$sound/paplay.log
+
+# --- D1: sound off gate ---
+write_tmux_mock off
+cat > "$sound/bin/afplay" <<EOF
+#!/usr/bin/env sh
+printf 'afplay %s\n' "\$*" >> "$afplay_log"
+EOF
+chmod +x "$sound/bin/afplay"
+
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+
+if [ -f "$afplay_log" ]; then
+    echo 'afplay was called while @agent-radar-sound is off' >&2
+    exit 1
+fi
+
+# --- D2: Darwin sound on ---
+write_tmux_mock on
+cat > "$sound/bin/uname" <<'EOF'
+#!/usr/bin/env sh
+printf 'Darwin\n'
+EOF
+chmod +x "$sound/bin/uname"
+
+osascript_log=$sound/osascript.log
+: > "$osascript_log"
+cat > "$sound/bin/osascript" <<EOF
+#!/usr/bin/env sh
+printf 'osascript %s\n' "\$*" >> "$osascript_log"
+EOF
+chmod +x "$sound/bin/osascript"
+
+: > "$afplay_log"
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+sleep 0.2
+[ -s "$osascript_log" ] || {
+    echo 'Darwin OS notification was not emitted' >&2
+    exit 1
+}
+grep -F '/System/Library/Sounds/Ping.aiff' "$afplay_log" >/dev/null || {
+    echo 'Darwin sound did not play Ping.aiff' >&2
+    exit 1
+}
+
+# --- D3: Linux canberra-gtk-play ---
+write_tmux_mock on
+cat > "$sound/bin/uname" <<'EOF'
+#!/usr/bin/env sh
+printf 'Linux\n'
+EOF
+chmod +x "$sound/bin/uname"
+cat > "$sound/bin/canberra-gtk-play" <<EOF
+#!/usr/bin/env sh
+printf 'canberra-gtk-play %s\n' "\$*" >> "$canberra_log"
+EOF
+chmod +x "$sound/bin/canberra-gtk-play"
+rm -f "$sound/bin/afplay" "$canberra_log"
+
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+sleep 0.2
+grep -F -- '-i complete' "$canberra_log" >/dev/null || {
+    echo 'canberra-gtk-play was not invoked with -i complete' >&2
+    exit 1
+}
+
+# --- D4: Linux paplay fallback ---
+write_tmux_mock on
+cat > "$sound/bin/paplay" <<EOF
+#!/usr/bin/env sh
+printf 'paplay %s\n' "\$*" >> "$paplay_log"
+EOF
+chmod +x "$sound/bin/paplay"
+rm -f "$sound/bin/canberra-gtk-play" "$paplay_log"
+
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+sleep 0.2
+grep -F '/usr/share/sounds/freedesktop/stereo/complete.oga' "$paplay_log" >/dev/null || {
+    echo 'paplay did not play fallback sound' >&2
+    exit 1
+}
+
+# --- D5: no player on Linux ---
+write_tmux_mock on
+rm -f "$sound/bin/canberra-gtk-play" "$sound/bin/paplay" "$sound/bin/afplay"
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+
+# --- D6: throttle window ---
+# Run with an env-var-supplied throttle file and a Darwin-afplay shim so the
+# player path is deterministic: first call (old mtime) should fire; second call
+# (mtime touched within the 3-second window) should be throttled.
+write_tmux_mock on
+cat > "$sound/bin/uname" <<'EOF'
+#!/usr/bin/env sh
+printf 'Darwin\n'
+EOF
+chmod +x "$sound/bin/uname"
+cat > "$sound/bin/afplay" <<EOF
+#!/usr/bin/env sh
+printf 'afplay %s\n' "\$*" >> "$afplay_log"
+EOF
+chmod +x "$sound/bin/afplay"
+rm -f "$sound/bin/canberra-gtk-play" "$sound/bin/paplay" "$afplay_log"
+
+throttle=$sound/throttle
+touch -t 200001010000 "$throttle"
+
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture AGENT_RADAR_SOUND_THROTTLE_FILE=$throttle "$poller" once
+sleep 0.2
+[ "$(wc -l < "$afplay_log")" -eq 1 ] || {
+    echo 'afplay not invoked on first (unthrottled) stop' >&2
+    exit 1
+}
+
+sleep 1
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture AGENT_RADAR_SOUND_THROTTLE_FILE=$throttle "$poller" once
+sleep 0.2
+[ "$(wc -l < "$afplay_log")" -eq 1 ] || {
+    echo 'afplay invoked during throttle window' >&2
+    exit 1
+}
+
 printf 'agent-radar-poller ok\n'
