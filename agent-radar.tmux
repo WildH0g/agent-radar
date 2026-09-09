@@ -52,5 +52,5 @@ case "$popup_position" in
     *) popup_x=$popup_position; popup_y=$popup_position ;;
 esac
 
-tmux bind-key "$popup_key" display-popup -E -e TERM=tmux-256color -w "$popup_width" -h "$popup_height" -x "$popup_x" -y "$popup_y" -d "#{pane_current_path}" "$current_dir/scripts/agent-radar-list"
+tmux bind-key "$popup_key" display-popup -E -e TERM=tmux-256color -w "$popup_width" -h "$popup_height" -x "$popup_x" -y "$popup_y" -d "#{pane_current_path}" "'$current_dir/scripts/agent-radar-list'"
 tmux run-shell -b "$current_dir/scripts/agent-radar-poller start"
