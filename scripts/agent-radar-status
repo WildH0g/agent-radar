@@ -30,7 +30,7 @@ opt() {
 # every single render — only fork agent-radar-poller when it's actually dead.
 poller_pid=$(tmux show-option -gqv @agent-radar-pid 2>/dev/null || true)
 if [ -z "$poller_pid" ] || ! kill -0 "$poller_pid" 2>/dev/null; then
-    tmux run-shell -b "$poller_cmd start" >/dev/null 2>&1 || true
+    tmux run-shell -b "'$poller_cmd' start" >/dev/null 2>&1 || true
 fi
 
 "$store_cmd" records > "$records"

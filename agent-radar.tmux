@@ -13,7 +13,7 @@ opt() {
     [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
 }
 
-status_cmd="#($current_dir/scripts/agent-radar-status '#S')"
+status_cmd="#('$current_dir/scripts/agent-radar-status' '#S')"
 status_left=$(tmux show-option -gqv status-left 2>/dev/null || true)
 
 case "$status_left" in
@@ -53,4 +53,4 @@ case "$popup_position" in
 esac
 
 tmux bind-key "$popup_key" display-popup -E -e TERM=tmux-256color -w "$popup_width" -h "$popup_height" -x "$popup_x" -y "$popup_y" -d "#{pane_current_path}" "'$current_dir/scripts/agent-radar-list'"
-tmux run-shell -b "$current_dir/scripts/agent-radar-poller start"
+tmux run-shell -b "'$current_dir/scripts/agent-radar-poller' start"

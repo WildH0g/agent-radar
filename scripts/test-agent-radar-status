@@ -60,7 +60,7 @@ PATH=$tmp/bin:$PATH AGENT_RADAR_STORE_FILE=$fixture TMUX_LOG=$log "$status" work
 printf '#[fg=yellow][agents - work]#[default]' > "$tmp/expected-out"
 diff -u "$tmp/expected-out" "$tmp/out"
 
-grep -Fx "run-shell -b $script_dir/agent-radar-poller start" "$log" >/dev/null || {
+grep -Fx "run-shell -b '$script_dir/agent-radar-poller' start" "$log" >/dev/null || {
     echo 'poller heartbeat was not invoked' >&2
     exit 1
 }
