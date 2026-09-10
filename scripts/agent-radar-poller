@@ -110,7 +110,7 @@ APPLESCRIPT
         notify-send "agent-radar: $1 stopped" "$2" >/dev/null 2>&1 &
     fi
 
-    [ "$(opt @agent-radar-sound on)" = on ] || return 0
+    [ "$(opt @agent-radar-sound off)" = on ] || return 0
 
     if [ -n "$throttle_file" ]; then
         last_sound=$(stat -c %Y "$throttle_file" 2>/dev/null || stat -f %m "$throttle_file" 2>/dev/null || true)

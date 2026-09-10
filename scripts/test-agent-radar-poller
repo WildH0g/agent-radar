@@ -312,6 +312,20 @@ if [ -f "$afplay_log" ]; then
     exit 1
 fi
 
+# --- D1b: default off (option unset -> no sound) ---
+write_tmux_mock ''
+cat > "$sound/bin/uname" <<'EOF'
+#!/usr/bin/env sh
+printf 'Darwin\n'
+EOF
+chmod +x "$sound/bin/uname"
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+
+if [ -f "$afplay_log" ]; then
+    echo 'afplay was called while @agent-radar-sound is unset (must default to off)' >&2
+    exit 1
+fi
+
 # --- D2: Darwin sound on ---
 write_tmux_mock on
 cat > "$sound/bin/uname" <<'EOF'

@@ -1,6 +1,6 @@
 # Stop sound rides the notify flag through a host-player probe, not the tmux bell
 
-When a `working → stopped` transition sets the `notify` flag — the same flag that already fires the OS notification in `notify_stopped` in `agent-radar-poller` — the plugin also plays a short sound: `afplay` on a system sound on Darwin, else the first available Linux player, preferring a named event sound (`canberra-gtk-play -i complete`) so no audio asset ships with the plugin. Finding no player at all is a silent no-op, and a `@agent-radar-sound` user option (default on) gates the cue.
+When a `working → stopped` transition sets the `notify` flag — the same flag that already fires the OS notification in `notify_stopped` in `agent-radar-poller` — the plugin also plays a short sound: `afplay` on a system sound on Darwin, else the first available Linux player, preferring a named event sound (`canberra-gtk-play -i complete`) so no audio asset ships with the plugin. Finding no player at all is a silent no-op, and a `@agent-radar-sound` user option (default off — zero surprise on upgrade, the maintainer's preference) gates the cue.
 
 ## Why ride the notify flag
 
