@@ -297,6 +297,26 @@ afplay_log=$sound/afplay.log
 canberra_log=$sound/canberra.log
 paplay_log=$sound/paplay.log
 
+# Poll until $1 exists with at least $2 lines (~20ms interval, ~3s / 150 tries).
+# Optional $3 overrides the try cap (shorter absence settles). Returns 0, or 1 on timeout.
+wait_for() {
+    _wf_file=$1
+    _wf_min=$2
+    _wf_max=${3:-150}
+    _wf_n=0
+    while [ "$_wf_n" -lt "$_wf_max" ]; do
+        if [ -f "$_wf_file" ]; then
+            _wf_lines=$(wc -l < "$_wf_file")
+            if [ "$_wf_lines" -ge "$_wf_min" ]; then
+                return 0
+            fi
+        fi
+        _wf_n=$((_wf_n + 1))
+        sleep 0.02
+    done
+    return 1
+}
+
 # --- D1: sound off gate ---
 write_tmux_mock off
 cat > "$sound/bin/afplay" <<EOF
@@ -307,7 +327,7 @@ chmod +x "$sound/bin/afplay"
 
 PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
 
-if [ -f "$afplay_log" ]; then
+if wait_for "$afplay_log" 1 50 || [ -f "$afplay_log" ]; then
     echo 'afplay was called while @agent-radar-sound is off' >&2
     exit 1
 fi
@@ -321,7 +341,7 @@ EOF
 chmod +x "$sound/bin/uname"
 PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
 
-if [ -f "$afplay_log" ]; then
+if wait_for "$afplay_log" 1 50 || [ -f "$afplay_log" ]; then
     echo 'afplay was called while @agent-radar-sound is unset (must default to off)' >&2
     exit 1
 fi
@@ -344,9 +364,12 @@ chmod +x "$sound/bin/osascript"
 
 : > "$afplay_log"
 PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
-sleep 0.2
-[ -s "$osascript_log" ] || {
+wait_for "$osascript_log" 1 || {
     echo 'Darwin OS notification was not emitted' >&2
+    exit 1
+}
+wait_for "$afplay_log" 1 || {
+    echo 'Darwin sound did not play Ping.aiff' >&2
     exit 1
 }
 grep -F '/System/Library/Sounds/Ping.aiff' "$afplay_log" >/dev/null || {
@@ -369,7 +392,10 @@ chmod +x "$sound/bin/canberra-gtk-play"
 rm -f "$sound/bin/afplay" "$canberra_log"
 
 PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
-sleep 0.2
+wait_for "$canberra_log" 1 || {
+    echo 'canberra-gtk-play was not invoked with -i complete' >&2
+    exit 1
+}
 grep -F -- '-i complete' "$canberra_log" >/dev/null || {
     echo 'canberra-gtk-play was not invoked with -i complete' >&2
     exit 1
@@ -385,7 +411,10 @@ chmod +x "$sound/bin/paplay"
 rm -f "$sound/bin/canberra-gtk-play" "$paplay_log"
 
 PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
-sleep 0.2
+wait_for "$paplay_log" 1 || {
+    echo 'paplay did not play fallback sound' >&2
+    exit 1
+}
 grep -F '/usr/share/sounds/freedesktop/stereo/complete.oga' "$paplay_log" >/dev/null || {
     echo 'paplay did not play fallback sound' >&2
     exit 1
@@ -417,7 +446,10 @@ throttle=$sound/throttle
 touch -t 200001010000 "$throttle"
 
 PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture AGENT_RADAR_SOUND_THROTTLE_FILE=$throttle "$poller" once
-sleep 0.2
+wait_for "$afplay_log" 1 || {
+    echo 'afplay not invoked on first (unthrottled) stop' >&2
+    exit 1
+}
 [ "$(wc -l < "$afplay_log")" -eq 1 ] || {
     echo 'afplay not invoked on first (unthrottled) stop' >&2
     exit 1
@@ -425,7 +457,10 @@ sleep 0.2
 
 sleep 1
 PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture AGENT_RADAR_SOUND_THROTTLE_FILE=$throttle "$poller" once
-sleep 0.2
+if wait_for "$afplay_log" 2 50; then
+    echo 'afplay invoked during throttle window' >&2
+    exit 1
+fi
 [ "$(wc -l < "$afplay_log")" -eq 1 ] || {
     echo 'afplay invoked during throttle window' >&2
     exit 1
