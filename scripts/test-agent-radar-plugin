@@ -37,5 +37,17 @@ grep -F 'set-option -g window-status-current-format #{?@agent-radar-window-stopp
     echo 'window-status-current-format does not include agent-radar stopped marker' >&2
     exit 1
 }
+grep -F "scripts/agent-radar-list'" "$log" >/dev/null || {
+    echo 'popup binding does not single-quote the list script path (breaks on plugin paths with spaces)' >&2
+    exit 1
+}
+grep -F "run-shell -b '" "$log" | grep -F "scripts/agent-radar-poller' start" >/dev/null || {
+    echo 'poller spawn does not single-quote the script path (run-shell goes through sh -c; breaks on plugin paths with spaces)' >&2
+    exit 1
+}
+grep -F "agent-radar-status' '#S'" "$log" >/dev/null || {
+    echo 'status-left command does not single-quote the status script path (breaks on plugin paths with spaces)' >&2
+    exit 1
+}
 
 printf 'agent-radar-plugin ok\n'

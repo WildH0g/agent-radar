@@ -61,6 +61,7 @@ Set with `tmux set-option -g <name> <value>` (or `set -g` in `~/.tmux.conf`):
 | `@agent-radar-processes` | `pi,claude,codex,opencode,hermes,aider,cursor` | Comma-separated agent executable names to detect; script/launcher-based agents (`hermes`, `opencode` via `uvx`, …) are matched by their command-line arguments too |
 | `@agent-radar-idle-seconds` | `3` | Seconds with no working indicator before a pane is "stopped" (the one calibration knob) |
 | `@agent-radar-poll-interval` | `2` | Seconds between poll cycles |
+| `@agent-radar-sound` | `off` | Play a short sound cue when an agent stops (in addition to the OS notification); `on` to enable. At most one sound per 3-second window across all panes. Requires `afplay` (macOS) or `canberra-gtk-play`/`paplay` (Linux); silent no-op if no player is found. |
 | `@agent-radar-working-pattern` | braille + square-bar glyphs + `msg=interrupt` | ERE for an agent's live working indicator, matched byte-wise; defaults to the braille glyph (pi/claude/codex), opencode's square progress bar, or hermes' prompt-line running hint. Override for agents that use a different indicator |
 | `@agent-radar-key` | `a` | Prefix key that opens the navigator popup |
 | `@agent-radar-popup-width` | `40%` | Popup width |
