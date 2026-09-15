@@ -266,12 +266,14 @@ chmod +x "$sound/bin/notify-send"
 
 write_tmux_mock() {
     _sound_value=$1
+    _notify_value=${2-on}
     cat > "$sound/bin/tmux" <<EOF
 #!/usr/bin/env sh
 case "\$1" in
     show-option)
         case "\$3" in
             @agent-radar-sound) printf '$_sound_value\n' ;;
+            @agent-radar-notify) printf '$_notify_value\n' ;;
             @agent-radar-idle-seconds) printf '3\n' ;;
             @agent-radar-poll-interval) printf '2\n' ;;
             @agent-radar-processes) printf 'pi,claude,codex,opencode,hermes,aider,cursor\n' ;;
@@ -317,6 +319,78 @@ wait_for() {
     return 1
 }
 
+# --- OS notification option tests ----------------------------------------
+
+# Pin the OS toast path to the Darwin shim so tests are deterministic
+# across hosts and do not fire real notifications.
+cat > "$sound/bin/uname" <<'EOF'
+#!/usr/bin/env sh
+printf 'Darwin\n'
+EOF
+chmod +x "$sound/bin/uname"
+
+osascript_log=$sound/osascript.log
+: > "$osascript_log"
+cat > "$sound/bin/osascript" <<EOF
+#!/usr/bin/env sh
+printf 'osascript %s\n' "\$*" >> "$osascript_log"
+EOF
+chmod +x "$sound/bin/osascript"
+
+# N1: default/unset -> toast (opt falls back to on)
+rm -f "$osascript_log"
+write_tmux_mock off
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+wait_for "$osascript_log" 1 || {
+    echo 'unset @agent-radar-notify did not emit OS toast (expected default on)' >&2
+    exit 1
+}
+
+# N2: explicit on -> toast
+rm -f "$osascript_log"
+write_tmux_mock off on
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+wait_for "$osascript_log" 1 || {
+    echo 'on @agent-radar-notify did not emit OS toast' >&2
+    exit 1
+}
+
+# N3: off -> no toast
+rm -f "$osascript_log"
+write_tmux_mock off off
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+if wait_for "$osascript_log" 1 50 || [ -f "$osascript_log" ]; then
+    echo 'off @agent-radar-notify emitted an OS toast' >&2
+    exit 1
+fi
+
+# N4: typo 'flase' -> no toast
+rm -f "$osascript_log"
+write_tmux_mock off flase
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+if wait_for "$osascript_log" 1 50 || [ -f "$osascript_log" ]; then
+    echo 'flase @agent-radar-notify emitted an OS toast' >&2
+    exit 1
+fi
+
+# N5: wrong case 'ON' -> no toast
+rm -f "$osascript_log"
+write_tmux_mock off ON
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+if wait_for "$osascript_log" 1 50 || [ -f "$osascript_log" ]; then
+    echo 'ON @agent-radar-notify emitted an OS toast' >&2
+    exit 1
+fi
+
+# N6: empty value -> toast (opt treats empty as unset and defaults to on)
+rm -f "$osascript_log"
+write_tmux_mock off ''
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+wait_for "$osascript_log" 1 || {
+    echo 'empty @agent-radar-notify did not emit OS toast (opt defaults empty to on)' >&2
+    exit 1
+}
+
 # --- D1: sound off gate ---
 write_tmux_mock off
 cat > "$sound/bin/afplay" <<EOF
@@ -346,6 +420,7 @@ if wait_for "$afplay_log" 1 50 || [ -f "$afplay_log" ]; then
     exit 1
 fi
 
+# NOTIFY characterization: unset → toast fires (sound=on)
 # --- D2: Darwin sound on ---
 write_tmux_mock on
 cat > "$sound/bin/uname" <<'EOF'
@@ -465,5 +540,80 @@ fi
     echo 'afplay invoked during throttle window' >&2
     exit 1
 }
+
+# --- Isolation tests: notify option independent of sound -----------------
+
+# Ensure only the Darwin sound path is available.
+rm -f "$sound/bin/canberra-gtk-play" "$sound/bin/paplay"
+
+cat > "$sound/bin/uname" <<'EOF'
+#!/usr/bin/env sh
+printf 'Darwin\n'
+EOF
+chmod +x "$sound/bin/uname"
+
+cat > "$sound/bin/osascript" <<EOF
+#!/usr/bin/env sh
+printf 'osascript %s\n' "\$*" >> "$osascript_log"
+EOF
+chmod +x "$sound/bin/osascript"
+
+cat > "$sound/bin/afplay" <<EOF
+#!/usr/bin/env sh
+printf 'afplay %s\n' "\$*" >> "$afplay_log"
+EOF
+chmod +x "$sound/bin/afplay"
+
+# I1: both on -> toast + sound
+rm -f "$osascript_log" "$afplay_log"
+write_tmux_mock on on
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+wait_for "$osascript_log" 1 || {
+    echo 'both on: OS toast was not emitted' >&2
+    exit 1
+}
+wait_for "$afplay_log" 1 || {
+    echo 'both on: sound was not emitted' >&2
+    exit 1
+}
+
+# I2: notify off, sound on -> no toast, sound plays
+rm -f "$osascript_log" "$afplay_log"
+write_tmux_mock on off
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+if wait_for "$osascript_log" 1 50 || [ -f "$osascript_log" ]; then
+    echo 'notify off, sound on: OS toast was emitted' >&2
+    exit 1
+fi
+wait_for "$afplay_log" 1 || {
+    echo 'notify off, sound on: sound was not emitted' >&2
+    exit 1
+}
+
+# I3: notify on, sound off -> toast, no sound
+rm -f "$osascript_log" "$afplay_log"
+write_tmux_mock off on
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+wait_for "$osascript_log" 1 || {
+    echo 'notify on, sound off: OS toast was not emitted' >&2
+    exit 1
+}
+if wait_for "$afplay_log" 1 50 || [ -f "$afplay_log" ]; then
+    echo 'notify on, sound off: sound was emitted' >&2
+    exit 1
+fi
+
+# I4: both off -> neither
+rm -f "$osascript_log" "$afplay_log"
+write_tmux_mock off off
+PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
+if wait_for "$osascript_log" 1 50 || [ -f "$osascript_log" ]; then
+    echo 'both off: OS toast was emitted' >&2
+    exit 1
+fi
+if wait_for "$afplay_log" 1 50 || [ -f "$afplay_log" ]; then
+    echo 'both off: sound was emitted' >&2
+    exit 1
+fi
 
 printf 'agent-radar-poller ok\n'
