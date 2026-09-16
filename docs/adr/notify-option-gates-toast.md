@@ -8,7 +8,7 @@ Sound (`stop-sound-host-player.md`) is already a separate opt-in on the same fla
 
 ## Why default on, unlike sound
 
-Sound shipped off because it was new. The OS toast already ships; turning it off by default would be a behavior change on upgrade. Unset therefore means `on`, and `[ "$(opt @agent-radar-notify on)" = on ]` is the same comparison sound uses, just with the opposite default. Non-`on` values (`off`, `flase`, `ON`, empty) skip the toast — a typo silences, the same as a sound typo stays quiet.
+Sound shipped off because it was new. The OS toast already ships; turning it off by default would be a behavior change on upgrade. Unset therefore means `on`, and `[ "$(opt @agent-radar-notify on)" = on ]` is the same comparison sound uses, just with the opposite default. Non-`on` values (`off`, `flase`, `ON`) skip the toast — a typo silences, the same as a sound typo stays quiet.
 
 ## Why not `return 0` when notify is off
 
@@ -23,4 +23,4 @@ Sound shipped off because it was new. The OS toast already ships; turning it off
 
 ## Cost
 
-A focused session that wants silence must set the option; the default still floods the host notifier, which is the upgrade-safe choice and the previous behavior. Wrong-case `ON` and typos go silent with no warning — the same failure mode `@agent-radar-sound` already has. Reversible: delete the `if` and the README row.
+A user that wants silence must set the option; the default still floods the host notifier, which is the upgrade-safe choice and the previous behavior. Wrong-case `ON` and typos go silent with no warning — the same failure mode `@agent-radar-sound` already has. Reversible: delete the `if` and the README row.
