@@ -100,14 +100,16 @@ agent_for_tty() {
 }
 
 notify_stopped() {
-    if [ "$(uname -s 2>/dev/null || true)" = Darwin ] && command -v osascript >/dev/null 2>&1; then
-        osascript - "$1" "$2" <<'APPLESCRIPT' >/dev/null 2>&1 &
+    if [ "$(opt @agent-radar-notify on)" = on ]; then
+        if [ "$(uname -s 2>/dev/null || true)" = Darwin ] && command -v osascript >/dev/null 2>&1; then
+            osascript - "$1" "$2" <<'APPLESCRIPT' >/dev/null 2>&1 &
 on run argv
   display notification (item 2 of argv) with title ("agent-radar: " & item 1 of argv & " stopped")
 end run
 APPLESCRIPT
-    elif command -v notify-send >/dev/null 2>&1; then
-        notify-send "agent-radar: $1 stopped" "$2" >/dev/null 2>&1 &
+        elif command -v notify-send >/dev/null 2>&1; then
+            notify-send "agent-radar: $1 stopped" "$2" >/dev/null 2>&1 &
+        fi
     fi
 
     [ "$(opt @agent-radar-sound off)" = on ] || return 0
