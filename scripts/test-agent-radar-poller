@@ -267,13 +267,20 @@ chmod +x "$sound/bin/notify-send"
 write_tmux_mock() {
     _sound_value=$1
     _notify_value=${2-on}
+    # 'unset' models a missing @agent-radar-notify: real `tmux show-option -gqv`
+    # prints nothing at all, so opt() must fall back to its default. Every other
+    # value (including an explicit empty string) is answered verbatim.
+    case "$_notify_value" in
+        unset) _notify_cmd=: ;;
+        *) _notify_cmd="printf '$_notify_value\\n'" ;;
+    esac
     cat > "$sound/bin/tmux" <<EOF
 #!/usr/bin/env sh
 case "\$1" in
     show-option)
         case "\$3" in
             @agent-radar-sound) printf '$_sound_value\n' ;;
-            @agent-radar-notify) printf '$_notify_value\n' ;;
+            @agent-radar-notify) $_notify_cmd ;;
             @agent-radar-idle-seconds) printf '3\n' ;;
             @agent-radar-poll-interval) printf '2\n' ;;
             @agent-radar-processes) printf 'pi,claude,codex,opencode,hermes,aider,cursor\n' ;;
@@ -337,9 +344,9 @@ printf 'osascript %s\n' "\$*" >> "$osascript_log"
 EOF
 chmod +x "$sound/bin/osascript"
 
-# N1: default/unset -> toast (opt falls back to on)
+# N1: @agent-radar-notify unset -> toast (opt falls back to on)
 rm -f "$osascript_log"
-write_tmux_mock off
+write_tmux_mock off unset
 PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
 wait_for "$osascript_log" 1 || {
     echo 'unset @agent-radar-notify did not emit OS toast (expected default on)' >&2
@@ -392,7 +399,7 @@ wait_for "$osascript_log" 1 || {
 }
 
 # --- D1: sound off gate ---
-write_tmux_mock off
+write_tmux_mock off on
 cat > "$sound/bin/afplay" <<EOF
 #!/usr/bin/env sh
 printf 'afplay %s\n' "\$*" >> "$afplay_log"
@@ -407,7 +414,7 @@ if wait_for "$afplay_log" 1 50 || [ -f "$afplay_log" ]; then
 fi
 
 # --- D1b: default off (option unset -> no sound) ---
-write_tmux_mock ''
+write_tmux_mock '' on
 cat > "$sound/bin/uname" <<'EOF'
 #!/usr/bin/env sh
 printf 'Darwin\n'
@@ -420,9 +427,9 @@ if wait_for "$afplay_log" 1 50 || [ -f "$afplay_log" ]; then
     exit 1
 fi
 
-# NOTIFY characterization: unset → toast fires (sound=on)
+# NOTIFY characterization: explicit on → toast fires (sound=on)
 # --- D2: Darwin sound on ---
-write_tmux_mock on
+write_tmux_mock on on
 cat > "$sound/bin/uname" <<'EOF'
 #!/usr/bin/env sh
 printf 'Darwin\n'
@@ -453,7 +460,7 @@ grep -F '/System/Library/Sounds/Ping.aiff' "$afplay_log" >/dev/null || {
 }
 
 # --- D3: Linux canberra-gtk-play ---
-write_tmux_mock on
+write_tmux_mock on on
 cat > "$sound/bin/uname" <<'EOF'
 #!/usr/bin/env sh
 printf 'Linux\n'
@@ -477,7 +484,7 @@ grep -F -- '-i complete' "$canberra_log" >/dev/null || {
 }
 
 # --- D4: Linux paplay fallback ---
-write_tmux_mock on
+write_tmux_mock on on
 cat > "$sound/bin/paplay" <<EOF
 #!/usr/bin/env sh
 printf 'paplay %s\n' "\$*" >> "$paplay_log"
@@ -496,7 +503,7 @@ grep -F '/usr/share/sounds/freedesktop/stereo/complete.oga' "$paplay_log" >/dev/
 }
 
 # --- D5: no player on Linux ---
-write_tmux_mock on
+write_tmux_mock on on
 rm -f "$sound/bin/canberra-gtk-play" "$sound/bin/paplay" "$sound/bin/afplay"
 PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
 
@@ -504,7 +511,7 @@ PATH=$sound/bin AGENT_RADAR_STORE_FILE=$sound_fixture "$poller" once
 # Run with an env-var-supplied throttle file and a Darwin-afplay shim so the
 # player path is deterministic: first call (old mtime) should fire; second call
 # (mtime touched within the 3-second window) should be throttled.
-write_tmux_mock on
+write_tmux_mock on on
 cat > "$sound/bin/uname" <<'EOF'
 #!/usr/bin/env sh
 printf 'Darwin\n'
