@@ -1,21 +1,79 @@
 #!/usr/bin/env sh
 set -eu
 
-script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 0
+script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P) || exit 0
 store_cmd=$script_dir/agent-radar-store
 classify_cmd=$script_dir/agent-radar-classify
 
 rows() {
+    popup_width=$(tmux show-option -gqv @agent-radar-popup-width 2>/dev/null || true)
+    case "$popup_width" in
+        ''|*[!0-9%]*) popup_width='40%' ;;
+    esac
+    case "$popup_width" in
+        *%)
+            pct=${popup_width%'%'}
+            case "$pct" in ''|*[!0-9]*) pct=40 ;; esac
+            win_width=$(tmux display-message -p '#{window_width}' 2>/dev/null || true)
+            case "$win_width" in ''|*[!0-9]*) win_width=80 ;; esac
+            max_width=$((win_width * pct / 100)) ;;
+        *)
+            max_width=$popup_width ;;
+    esac
+    [ "$max_width" -gt 0 ] || max_width=80
+
     "$store_cmd" records |
     "$classify_cmd" "${AGENT_RADAR_NOW:-$(date +%s)}" |
-    awk -F '|' '
+    while IFS='|' read -r tier age sortkey pane agent target state stopped_at seen_at; do
+        session=$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)
+        win_idx=$(tmux display-message -p -t "$pane" '#{window_index}' 2>/dev/null || true)
+        pane_idx=$(tmux display-message -p -t "$pane" '#{pane_index}' 2>/dev/null || true)
+        win_name=$(tmux display-message -p -t "$pane" '#{window_name}' 2>/dev/null || true)
+        pane_dir=$(tmux display-message -p -t "$pane" '#{pane_current_path}' 2>/dev/null || true)
+        branch=$(git -C "$pane_dir" branch --show-current 2>/dev/null || true)
+        [ -n "$branch" ] || branch='-'
+        printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+            "$tier" "$age" "$sortkey" "$pane" "$agent" "$target" \
+            "$session" "$win_idx" "$pane_idx" "$win_name" "$branch" \
+            "$state" "$stopped_at" "$seen_at"
+    done |
+    awk -v max_width="$max_width" -F '|' '
+function visible(s,    tmp) {
+    tmp = s
+    gsub(/\033\[[0-9;]*m/, "", tmp)
+    return length(tmp)
+}
+function bold(s) { return "\033[1m" s "\033[0m" }
+function dim(s) { return "\033[2m" s "\033[0m" }
+function sep() { return " " dim("·") " " }
+function row(show_age, show_branch, name,    out, addr, br) {
+    addr = ":" win_idx "." pane_idx
+    out = dot " " bold(agent) sep() bold(session)
+    if (name != "")
+        out = out sep() bold(name)
+    out = out sep() dim(addr)
+    if (show_branch) {
+        if (branch == "-")
+            br = dim("-")
+        else
+            br = dim("⎇ " branch)
+        out = out sep() br
+    }
+    if (show_age && age != "")
+        out = out " " dim(age)
+    return out
+}
 {
     tier = $1
     age = $2
     sortkey = $3
     pane = $4
     agent = $5
-    target = $6
+    session = $7
+    win_idx = $8
+    pane_idx = $9
+    win_name = $10
+    branch = $11
 
     if (tier == 0)
         dot = "\033[31m●\033[0m"
@@ -26,8 +84,20 @@ rows() {
     else
         next
 
-    display = dot " " agent " " target
-    if (age != "") display = display " " age
+    display = row(1, 1, win_name)
+    if (visible(display) > max_width)
+        display = row(0, 1, win_name)
+    if (visible(display) > max_width)
+        display = row(0, 0, win_name)
+    if (visible(display) > max_width) {
+        ellipsis = "\342\200\246"
+        name = win_name
+        while (visible(display) > max_width && length(name) > 1) {
+            name = substr(name, 2)
+            display = row(0, 0, ellipsis name)
+        }
+    }
+
     print tier "|" sortkey "|" display "|" pane
 }' |
     sort -t '|' -k1,1n -k2,2
@@ -49,13 +119,14 @@ case "$refresh_interval" in
     ''|*[!0-9]*) refresh_interval=2 ;;
 esac
 [ "$refresh_interval" -gt 0 ] || refresh_interval=1
-script_path=$(CDPATH= cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
+script_path=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
+# shellcheck disable=SC2016
 refresh_cmd='"$AGENT_RADAR_LIST" rows; sleep '"$refresh_interval"
 
 selected=$(
     printf '%s\n' "$rows" |
-    AGENT_RADAR_LIST=$script_path FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= fzf --ansi --layout=reverse \
-        --delimiter='|' --with-nth=3 --track --id-nth=4 \
+    AGENT_RADAR_LIST=$script_path FZF_DEFAULT_OPTS='' FZF_DEFAULT_OPTS_FILE='' fzf --ansi --layout=reverse \
+        --delimiter='|' --with-nth='{3}' --track --id-nth=4 \
         --bind "load:reload($refresh_cmd)" || true
 )
 [ -n "$selected" ] || exit 0
@@ -64,7 +135,10 @@ pane=$(printf '%s' "$selected" | awk -F '|' '{print $4}')
 session=$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)
 window=$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)
 
-[ -n "$session" ] && [ -n "$window" ] || { tmux display-message 'agent-radar: pane disappeared'; exit 0; }
+if [ -z "$session" ] || [ -z "$window" ]; then
+    tmux display-message 'agent-radar: pane disappeared'
+    exit 0
+fi
 
 tmux switch-client -t "$session"
 tmux select-window -t "$window"

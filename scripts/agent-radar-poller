@@ -212,11 +212,13 @@ start() {
         exit 0
     fi
 
-    pid_set "$$"
     if [ -z "$throttle_file" ]; then
         throttle_file=$(mktemp "${TMPDIR:-/tmp}/agent-radar-sound-throttle.XXXXXX") || exit 1
     fi
+    # Arm the trap before pid_set: publishing the pid first leaves a window
+    # where a stop signal kills the daemon without clearing @agent-radar-pid.
     trap 'rm -f "$throttle_file"; pid_unset "$$"; exit 0' INT TERM HUP EXIT
+    pid_set "$$"
 
     # ponytail: list-sessions only needs the server, not an attached client;
     # display-message failed whenever every client briefly detached, ending

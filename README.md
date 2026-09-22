@@ -20,8 +20,11 @@ harness, not just the ones with hooks.
   until you focus the exact agent pane.
 - **Navigates**: `prefix + a` opens an fzf popup listing all agent panes,
   stopped ones first, with a red/yellow/green status dot (unseen-stopped,
-  running, seen-stopped) and stopped age. The list refreshes while open. Pick
-  one and it jumps to that exact `session:window.pane`.
+  running, seen-stopped). Each row is harness, session, window name, `:window.pane`,
+  then the pane's git branch (`⎇ <branch>`; `-` when none), separated by `·`.
+  Harness, session, and window name are bold. The address, the branch glyph, and a
+  stopped age are dim. The list refreshes while open. Pick one and it jumps to that
+  exact `session:window.pane`. Example: `● pi · zeta · my-agent-win · :1.0 · ⎇ feat/spam-stop 30s`.
 
 ## Requirements
 

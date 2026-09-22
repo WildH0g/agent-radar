@@ -1,0 +1,108 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P) || exit 1
+list=$script_dir/agent-radar-list
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-list-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+records=$tmp/records
+env=$tmp/env
+cat > "$records" <<'EOF'
+%z|pi|zeta:1.0|||stopped|90|
+%a|claude|alpha:1.0|||running||
+%b|codex|beta:1.0|||stopped|100|100
+EOF
+cat > "$env" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%z_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%z_TARGET=zeta:1.0
+TMUX_AGENT_RADAR_PANE_%z_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%z_STOPPED_AT=90
+TMUX_AGENT_RADAR_PANE_%a_AGENT=claude
+TMUX_AGENT_RADAR_PANE_%a_TARGET=alpha:1.0
+TMUX_AGENT_RADAR_PANE_%a_STATE=running
+TMUX_AGENT_RADAR_PANE_%b_AGENT=codex
+TMUX_AGENT_RADAR_PANE_%b_TARGET=beta:1.0
+TMUX_AGENT_RADAR_PANE_%b_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%b_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%b_SEEN_STOPPED_AT=100
+EOF
+
+cat > "$tmp/tmux" <<EOF
+#!/usr/bin/env sh
+set -eu
+
+popup_width='40%'
+window_width=200
+
+if [ "\$#" -ge 1 ] && [ "\$1" = "show-option" ]; then
+    printf '%s\\n' "\$popup_width"
+    exit 0
+fi
+
+pane=
+fmt=
+while [ "\$#" -gt 0 ]; do
+    case "\$1" in
+        -t) pane=\$2; shift 2 ;;
+        -p) shift ;;
+        *) fmt=\$1; shift ;;
+    esac
+done
+
+case "\$pane" in
+    %z) session=zeta; win_idx=1; pane_idx=0; win_name=my-agent-win; pane_dir="$tmp/zeta" ;;
+    %a) session=alpha; win_idx=1; pane_idx=0; win_name=agent-radar; pane_dir="$tmp/alpha" ;;
+    %b) session=beta; win_idx=2; pane_idx=0; win_name=obsidian-vault; pane_dir="$tmp/beta" ;;
+    *) session=; win_idx=; pane_idx=; win_name=; pane_dir=. ;;
+esac
+
+case "\$fmt" in
+    '#{session_name}') printf '%s\\n' "\$session" ;;
+    '#{window_index}') printf '%s\\n' "\$win_idx" ;;
+    '#{pane_index}') printf '%s\\n' "\$pane_idx" ;;
+    '#{window_name}') printf '%s\\n' "\$win_name" ;;
+    '#{pane_current_path}') printf '%s\\n' "\$pane_dir" ;;
+    '#{window_width}') printf '%s\\n' "\$window_width" ;;
+    *) printf '' ;;
+esac
+EOF
+chmod +x "$tmp/tmux"
+
+cat > "$tmp/git" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+
+dir=.
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -C) dir=$2; shift 2 ;;
+        branch|--show-current) shift ;;
+        *) shift ;;
+    esac
+done
+
+case "$dir" in
+    *zeta) printf 'feat/spam-stop\n' ;;
+    *beta) printf 'main\n' ;;
+    *) exit 0 ;;
+esac
+EOF
+chmod +x "$tmp/git"
+
+AGENT_RADAR_STORE_FILE=$env AGENT_RADAR_NOW=120 PATH="$tmp:$PATH" "$list" rows > "$tmp/list-rows"
+
+{
+    printf '0|000000000090|\033[31m●\033[0m \033[1mpi\033[0m \033[2m·\033[0m \033[1mzeta\033[0m \033[2m·\033[0m \033[1mmy-agent-win\033[0m \033[2m·\033[0m \033[2m:1.0\033[0m \033[2m·\033[0m \033[2m⎇ feat/spam-stop\033[0m \033[2m30s\033[0m|%%z\n'
+    printf '1|alpha:1.0|\033[33m●\033[0m \033[1mclaude\033[0m \033[2m·\033[0m \033[1malpha\033[0m \033[2m·\033[0m \033[1magent-radar\033[0m \033[2m·\033[0m \033[2m:1.0\033[0m \033[2m·\033[0m \033[2m-\033[0m|%%a\n'
+    printf '2|beta:1.0|\033[32m●\033[0m \033[1mcodex\033[0m \033[2m·\033[0m \033[1mbeta\033[0m \033[2m·\033[0m \033[1mobsidian-vault\033[0m \033[2m·\033[0m \033[2m:2.0\033[0m \033[2m·\033[0m \033[2m⎇ main\033[0m \033[2m20s\033[0m|%%b\n'
+} > "$tmp/expected-list"
+diff -u "$tmp/expected-list" "$tmp/list-rows"
+
+# The old address-only format must not be produced.
+if grep -Fq 'pi zeta:1.0' "$tmp/list-rows"; then
+    echo 'agent-radar-list: old address-only row format detected' >&2
+    exit 1
+fi
+
+printf 'agent-radar-list ok\n'
