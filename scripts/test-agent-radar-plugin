@@ -11,20 +11,24 @@ log=$tmp/tmux.log
 mkdir "$tmp/bin"
 cat > "$tmp/bin/tmux" <<'EOF'
 #!/usr/bin/env sh
+stock_slot='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }'
 case "$1" in
     show-option)
         case "$3" in
             @agent-radar-glance) printf '%s\n' "${TEST_GLANCE:-on}" ;;
             @agent-radar-glance-orig-status) printf '%s\n' "${TEST_ORIG_STATUS:-}" ;;
             status-left) printf 'left ' ;;
-            status-format\[1\]) printf '%s\n' "${TEST_SLOT:-#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }}" ;;
+            status-format\[1\])
+                if [ "${TEST_SLOT+x}" = x ]; then printf '%s\n' "$TEST_SLOT"
+                else printf '%s\n' "$stock_slot"; fi
+                ;;
             status) printf '%s\n' "${TEST_STATUS:-on}" ;;
             window-status-format) printf '#I:#W' ;;
             window-status-current-format) printf '#[reverse]#I:#W' ;;
             *) exit 0 ;;
         esac
         ;;
-    set-option|bind-key|run-shell|set-hook)
+    set-option|bind-key|run-shell|set-hook|display-message)
         printf '%s\n' "$*" >> "$TMUX_LOG"
         ;;
     *) echo "unexpected tmux $*" >&2; exit 1 ;;
@@ -74,6 +78,30 @@ grep -F "bind-key A run-shell -b '$repo_dir/scripts/agent-radar-toggle'" "$log" 
     echo 'toggle binding does not single-quote the toggle script path' >&2
     exit 1
 }
+
+# --- Custom formats with stock tokens still belong to the user ---
+for slot in 'custom #{pane_index}' 'custom #{pane_width}x#{pane_height}'; do
+    : > "$log"
+    PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_SLOT="$slot" "$repo_dir/agent-radar.tmux"
+    grep -F 'agent-radar: status line 2 is in use' "$log" >/dev/null || {
+        echo 'plugin did not reject custom row' >&2; exit 1
+    }
+    if grep -F 'set-option -g status-format[1]' "$log" >/dev/null; then
+        echo 'plugin overwrote custom row' >&2; exit 1
+    fi
+done
+
+# --- Re-source while on must retain the original one-row baseline ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATUS=2 TEST_ORIG_STATUS=on \
+    TEST_SLOT="#('$repo_dir/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    "$repo_dir/agent-radar.tmux"
+grep -F 'set-option -gq @agent-radar-glance-state on' "$log" >/dev/null || {
+    echo 'reload did not recognize its own glance row' >&2; exit 1
+}
+if grep -F 'set-option -gq @agent-radar-glance-orig-status 2' "$log" >/dev/null; then
+    echo 'reload replaced the original one-row baseline with two rows' >&2; exit 1
+fi
 
 # --- Reload with @agent-radar-glance off tears down an existing glance ---
 : > "$log"

@@ -56,7 +56,7 @@ grep -F 'set-option -gq @agent-radar-glance-state on' "$log" >/dev/null || {
 
 # --- off -> on: occupied slot ---
 : > "$log"
-PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=off TEST_SLOT='custom text' \
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=off TEST_SLOT='custom #{pane_index}' \
     "$toggle"
 grep -F 'agent-radar: status line 2 is in use; set -g @agent-radar-glance-row M' "$log" >/dev/null || {
     echo 'toggle on did not error on occupied slot' >&2; exit 1
@@ -83,7 +83,7 @@ grep -F 'set-option -gq @agent-radar-glance-state off' "$log" >/dev/null || {
 # --- on -> off: slot changed by user, still lower status if we raised it ---
 : > "$log"
 PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=1 \
-    TEST_SLOT='custom user text' "$toggle"
+    TEST_SLOT='custom user agent-radar-glance text' "$toggle"
 if grep -F 'status-format[1]' "$log" >/dev/null; then
     echo 'toggle off clobbered user slot' >&2; exit 1
 fi

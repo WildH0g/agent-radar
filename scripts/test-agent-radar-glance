@@ -205,12 +205,13 @@ EOF
 PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
     TEST_WIDTH=20 AGENT_RADAR_NOW=120 "$glance" work 20 > "$tmp/out6"
 grep -F 'zeta' "$tmp/out6" >/dev/null || { echo 'truncation dropped front pane' >&2; exit 1; }
+grep -F 'middle' "$tmp/out6" >/dev/null && { echo 'truncation exceeded width' >&2; exit 1; }
 grep -F 'beta' "$tmp/out6" >/dev/null && { echo 'truncation kept tail pane' >&2; exit 1; }
 
 # --- occupied slot: error once ---
 : > "$log"
 PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
-    TEST_SLOT='custom user text' AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out7"
+    TEST_SLOT='custom #{pane_index}' AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out7"
 [ -z "$(cat "$tmp/out7")" ] || { echo 'occupied slot produced output' >&2; exit 1; }
 grep -F 'agent-radar: status line 2 is in use; set -g @agent-radar-glance-row M' "$log" >/dev/null || {
     echo 'occupied slot did not emit error' >&2; exit 1
@@ -222,7 +223,7 @@ grep -F 'set-option -gq @agent-radar-glance-occupied-error 1' "$log" >/dev/null 
 # second call with error flag set should not display again
 : > "$log"
 PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
-    TEST_SLOT='custom user text' TEST_OCCUPIED_ERROR=1 AGENT_RADAR_NOW=120 \
+    TEST_SLOT='custom #{pane_index}' TEST_OCCUPIED_ERROR=1 AGENT_RADAR_NOW=120 \
     "$glance" work 200 > "$tmp/out8"
 grep -F 'status line 2 is in use' "$log" >/dev/null && {
     echo 'occupied slot emitted error twice' >&2; exit 1
