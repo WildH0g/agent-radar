@@ -66,8 +66,8 @@ grep -F 'set-option -gq @agent-radar-glance-state on' "$log" >/dev/null || {
     echo 'glance live state was not set on' >&2
     exit 1
 }
-grep -F "run-shell -b '$repo_dir/scripts/agent-radar-status' '#{session_name}'" "$log" >/dev/null || {
-    echo 'session-window-changed hook does not single-quote the status script path' >&2
+grep -F "set-hook -g session-window-changed run-shell -b \"'$repo_dir/scripts/agent-radar-status' '#{session_name}'\"" "$log" >/dev/null || {
+    echo 'session-window-changed hook must pass one quoted command with a quoted script path' >&2
     exit 1
 }
 grep -F "bind-key A run-shell -b '$repo_dir/scripts/agent-radar-toggle'" "$log" >/dev/null || {
