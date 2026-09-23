@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
+# shellcheck shell=sh disable=SC1007
 set -eu
 
 repo_dir=$(CDPATH= cd "$(dirname "$0")/.." && pwd -P) || exit 1
@@ -13,13 +14,17 @@ cat > "$tmp/bin/tmux" <<'EOF'
 case "$1" in
     show-option)
         case "$3" in
+            @agent-radar-glance) printf '%s\n' "${TEST_GLANCE:-on}" ;;
+            @agent-radar-glance-orig-status) printf '%s\n' "${TEST_ORIG_STATUS:-}" ;;
             status-left) printf 'left ' ;;
+            status-format\[1\]) printf '%s\n' "${TEST_SLOT:-#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }}" ;;
+            status) printf '%s\n' "${TEST_STATUS:-on}" ;;
             window-status-format) printf '#I:#W' ;;
             window-status-current-format) printf '#[reverse]#I:#W' ;;
             *) exit 0 ;;
         esac
         ;;
-    set-option|bind-key|run-shell)
+    set-option|bind-key|run-shell|set-hook)
         printf '%s\n' "$*" >> "$TMUX_LOG"
         ;;
     *) echo "unexpected tmux $*" >&2; exit 1 ;;
@@ -45,8 +50,46 @@ grep -F "run-shell -b '" "$log" | grep -F "scripts/agent-radar-poller' start" >/
     echo 'poller spawn does not single-quote the script path (run-shell goes through sh -c; breaks on plugin paths with spaces)' >&2
     exit 1
 }
-grep -F "agent-radar-status' '#S'" "$log" >/dev/null || {
-    echo 'status-left command does not single-quote the status script path (breaks on plugin paths with spaces)' >&2
+grep -F "set-option -g status-format[1] #('$repo_dir/scripts/agent-radar-glance'" "$log" >/dev/null || {
+    echo 'glance format was not written to status-format[1]' >&2
+    exit 1
+}
+grep -F 'set-option -g status 2' "$log" >/dev/null || {
+    echo 'status was not raised to 2 for the glance line' >&2
+    exit 1
+}
+grep -F 'set-option -gq @agent-radar-glance-orig-status' "$log" >/dev/null || {
+    echo 'pre-raise status was not saved to @agent-radar-glance-orig-status' >&2
+    exit 1
+}
+grep -F 'set-option -gq @agent-radar-glance-state on' "$log" >/dev/null || {
+    echo 'glance live state was not set on' >&2
+    exit 1
+}
+grep -F "run-shell -b '$repo_dir/scripts/agent-radar-status' '#{session_name}'" "$log" >/dev/null || {
+    echo 'session-window-changed hook does not single-quote the status script path' >&2
+    exit 1
+}
+grep -F "bind-key A run-shell -b '$repo_dir/scripts/agent-radar-toggle'" "$log" >/dev/null || {
+    echo 'toggle binding does not single-quote the toggle script path' >&2
+    exit 1
+}
+
+# --- Reload with @agent-radar-glance off tears down an existing glance ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_GLANCE=off TEST_STATUS=2 TEST_ORIG_STATUS=on \
+    TEST_SLOT="#('$repo_dir/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    "$repo_dir/agent-radar.tmux"
+grep -F 'set-option -g status-format[1] #[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }' "$log" >/dev/null || {
+    echo 'reload with glance off did not restore stock status-format[1]' >&2
+    exit 1
+}
+grep -F 'set-option -g status on' "$log" >/dev/null || {
+    echo 'reload with glance off did not lower status' >&2
+    exit 1
+}
+grep -F 'set-option -gu @agent-radar-glance-state' "$log" >/dev/null || {
+    echo 'reload with glance off did not unset @agent-radar-glance-state' >&2
     exit 1
 }
 

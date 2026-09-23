@@ -1,0 +1,248 @@
+#!/usr/bin/env sh
+# shellcheck shell=sh disable=SC1007
+set -eu
+
+command -v tmux >/dev/null 2>&1 || { printf '%s\n' 'agent-radar: cannot read agent state'; exit 0; }
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 0
+store_cmd=$script_dir/agent-radar-store
+classify_cmd=$script_dir/agent-radar-classify
+poller_cmd=$script_dir/agent-radar-poller
+
+opt() {
+    v=$(tmux show-option -gqv "$1" 2>/dev/null || true)
+    [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
+}
+
+glance=$(opt @agent-radar-glance on)
+[ "$glance" = on ] || exit 0
+
+glance_row=$(opt @agent-radar-glance-row 2)
+case "$glance_row" in
+    ''|*[!0-9]*) glance_row=2 ;;
+esac
+glance_idx=$((glance_row - 1))
+
+# Claim the configured row only if it is free. The stock second-line pane-size
+# format is free, an empty slot is free, and our own glance is free.
+slot=$(tmux show-option -gqv "status-format[$glance_idx]" 2>/dev/null || true)
+free=0
+case "$slot" in
+    ''|*"$script_dir"/agent-radar-glance*) free=1 ;;
+    *'#{pane_index}'*|*'#{pane_width}'*'#{pane_height}'*) free=1 ;;
+esac
+if [ "$free" -eq 0 ]; then
+    err_sent=$(tmux show-option -gqv @agent-radar-glance-occupied-error 2>/dev/null || true)
+    if [ -z "$err_sent" ]; then
+        tmux display-message "agent-radar: status line $glance_row is in use; set -g @agent-radar-glance-row M"
+        tmux set-option -gq @agent-radar-glance-occupied-error 1
+    fi
+    exit 0
+fi
+tmux set-option -gu @agent-radar-glance-occupied-error 2>/dev/null || true
+
+current_session=${1:-}
+width=${2:-}
+case "$width" in
+    ''|*[!0-9]*) width=80 ;;
+esac
+
+records=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-records.XXXXXX") || { printf '%s\n' 'agent-radar: cannot read agent state'; exit 0; }
+rows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-rows.XXXXXX") || { printf '%s\n' 'agent-radar: cannot read agent state'; rm -f "$records"; exit 0; }
+unseen_windows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-unseen.XXXXXX") || { printf '%s\n' 'agent-radar: cannot read agent state'; rm -f "$records" "$rows"; exit 0; }
+render_input=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-render.XXXXXX") || { printf '%s\n' 'agent-radar: cannot read agent state'; rm -f "$records" "$rows" "$unseen_windows"; exit 0; }
+trap 'rm -f "$records" "$rows" "$unseen_windows" "$render_input"' EXIT INT TERM HUP
+
+# Poller self-heal: restart if the recorded pid is missing or stale.
+poller_pid=$(tmux show-option -gqv @agent-radar-pid 2>/dev/null || true)
+if [ -z "$poller_pid" ] || ! kill -0 "$poller_pid" 2>/dev/null; then
+    tmux run-shell -b "'$poller_cmd' start" >/dev/null 2>&1 || true
+fi
+
+if ! "$store_cmd" records > "$records" 2>/dev/null; then
+    printf '%s\n' 'agent-radar: cannot read agent state'
+    exit 0
+fi
+
+now=${AGENT_RADAR_NOW:-}
+[ -n "$now" ] || now=$(date +%s)
+if ! "$classify_cmd" "$now" < "$records" 2>/dev/null | sort -t '|' -k1,1n -k3,3 > "$rows"; then
+    printf '%s\n' 'agent-radar: cannot read agent state'
+    exit 0
+fi
+
+: > "$unseen_windows"
+while IFS='|' read -r tier age sortkey pane agent target state stopped_at seen_at; do
+    [ -n "${pane:-}" ] || continue
+    session=${target%%:*}
+
+    if [ "$tier" != 1 ] && [ -n "$current_session" ] && [ "$session" = "$current_session" ]; then
+        active_pane=$(tmux display-message -p -t "$current_session" '#{pane_id}' 2>/dev/null || true)
+        if [ "$active_pane" = "$pane" ]; then
+            AGENT_RADAR_STORE_RECORDS_FILE=$records "$store_cmd" set "$pane" seen_stopped_at "$stopped_at" >/dev/null 2>&1 || true
+            continue
+        fi
+    fi
+
+    if [ "$tier" = 0 ]; then
+        printf '%s\n' "${target%.*}" >> "$unseen_windows"
+    fi
+done < "$rows"
+
+# Sync window-highlight flags: clear everywhere, then set on unseen-stopped windows.
+tmux list-windows -a -F '#{session_name}:#{window_index}' 2>/dev/null |
+while IFS= read -r window; do
+    [ -n "$window" ] || continue
+    tmux set-window-option -t "$window" -qu @agent-radar-window-stopped 2>/dev/null || true
+done
+
+sort -u "$unseen_windows" |
+while IFS= read -r window; do
+    [ -n "$window" ] || continue
+    tmux set-window-option -t "$window" -q @agent-radar-window-stopped 1 2>/dev/null || true
+done
+
+if [ ! -s "$rows" ]; then
+    printf '%s\n' 'agent-radar: no agent panes'
+    exit 0
+fi
+
+fields=$(opt @agent-radar-glance-fields dot,target)
+need_window=0
+need_branch=0
+rest=$fields
+while [ -n "$rest" ]; do
+    case "$rest" in
+        *,*) token=${rest%%,*}; rest=${rest#*,} ;;
+        *) token=$rest; rest='' ;;
+    esac
+    case "$token" in
+        window) need_window=1 ;;
+        branch) need_branch=1 ;;
+    esac
+done
+
+: > "$render_input"
+while IFS='|' read -r tier age sortkey pane agent target state stopped_at seen_at; do
+    [ -n "${pane:-}" ] || continue
+    session=${target%%:*}
+    win_name=''
+    branch=''
+
+    if [ "$need_window" -eq 1 ]; then
+        win_name=$(tmux display-message -p -t "$pane" '#{window_name}' 2>/dev/null || true)
+    fi
+    if [ "$need_branch" -eq 1 ]; then
+        pane_dir=$(tmux display-message -p -t "$pane" '#{pane_current_path}' 2>/dev/null || true)
+        branch=$(git -C "$pane_dir" branch --show-current 2>/dev/null || true)
+        [ -n "$branch" ] || branch='-'
+    fi
+
+    printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+        "$tier" "$age" "$sortkey" "$pane" "$agent" "$target" \
+        "$state" "$stopped_at" "$seen_at" "$session" "$win_name" "$branch" >> "$render_input"
+done < "$rows"
+
+awk -v fields="$fields" -v width="$width" -F '|' '
+function visible(s,    tmp) {
+    tmp = s
+    gsub(/#\[[^]]*]/, "", tmp)
+    return length(tmp)
+}
+function bold(s) { return "#[bold]" s "#[default]" }
+function dim(s)  { return "#[dim]" s "#[default]" }
+function sep()   { return " " dim("·") " " }
+{
+    tier = $1
+    age = $2
+    pane = $4
+    agent = $5
+    target = $6
+    session = $10
+    win_name = $11
+    branch = $12
+
+    if (pane == "") next
+
+    if (tier == 0)
+        dot = "#[fg=red]●#[default]"
+    else if (tier == 1)
+        dot = "#[fg=yellow]●#[default]"
+    else
+        dot = "#[fg=green]●#[default]"
+
+    rest = target
+    sub(/^[^:]*:/, ":", rest)
+
+    n = split(fields, f, ",")
+    out = ""
+    last_tok = ""
+    for (i = 1; i <= n; i++) {
+        tok = f[i]
+        bit = ""
+        if (tok == "dot")
+            bit = dot
+        else if (tok == "target")
+            bit = bold(session) dim(rest)
+        else if (tok == "harness")
+            bit = bold(agent)
+        else if (tok == "session")
+            bit = bold(session)
+        else if (tok == "window")
+            bit = bold(win_name)
+        else if (tok == "branch") {
+            if (branch == "" || branch == "-")
+                bit = dim("-")
+            else
+                bit = dim("⎇ " branch)
+        }
+        else if (tok == "age" && age != "")
+            bit = dim(age)
+
+        if (bit == "") continue
+        if (out == "")
+            out = bit
+        else if (tok == "age" || last_tok == "dot")
+            out = out " " bit
+        else
+            out = out sep() bit
+        last_tok = tok
+    }
+
+    pane_count++
+    if (out != "") {
+        npanes++
+        pane_text[npanes] = "[" out "]"
+    }
+}
+END {
+    if (pane_count == 0) {
+        print "agent-radar: no agent panes"
+        exit
+    }
+    if (npanes == 0) {
+        print ""
+        exit
+    }
+
+    out = ""
+    for (i = 1; i <= npanes; i++) {
+        if (out == "")
+            out = pane_text[i]
+        else
+            out = out " " pane_text[i]
+    }
+
+    while (visible(out) > width && npanes > 1) {
+        npanes--
+        out = ""
+        for (i = 1; i <= npanes; i++) {
+            if (out == "")
+                out = pane_text[i]
+            else
+                out = out " " pane_text[i]
+        }
+    }
+
+    print out
+}' "$render_input"
