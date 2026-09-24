@@ -2,7 +2,8 @@
 # shellcheck shell=sh disable=SC1007
 set -eu
 
-command -v tmux >/dev/null 2>&1 || { printf '%s\n' 'agent-radar: cannot read agent state'; exit 0; }
+label='📡 Agent Radar │ '
+command -v tmux >/dev/null 2>&1 || { printf '%s%s\n' "$label" 'cannot read agent state'; exit 0; }
 
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 0
 store_cmd=$script_dir/agent-radar-store
@@ -61,12 +62,14 @@ esac
 # Keep the tint across field-level #[default] resets; fill paints unused cells.
 tint_prefix="#[bg=$tint,fill=$tint]#[push-default]"
 tint_suffix='#[pop-default]'
-emit() { printf '%s%s%s\n' "$tint_prefix" "$1" "$tint_suffix"; }
+# 📡 takes two terminal cells; reserve 17 columns for the full label.
+if [ "$width" -gt 17 ]; then width=$((width - 17)); else width=0; fi
+emit() { printf '%s%s%s%s\n' "$tint_prefix" "$label" "$1" "$tint_suffix"; }
 
-records=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-records.XXXXXX") || { emit 'agent-radar: cannot read agent state'; exit 0; }
-rows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-rows.XXXXXX") || { emit 'agent-radar: cannot read agent state'; rm -f "$records"; exit 0; }
-unseen_windows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-unseen.XXXXXX") || { emit 'agent-radar: cannot read agent state'; rm -f "$records" "$rows"; exit 0; }
-render_input=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-render.XXXXXX") || { emit 'agent-radar: cannot read agent state'; rm -f "$records" "$rows" "$unseen_windows"; exit 0; }
+records=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-records.XXXXXX") || { emit 'cannot read agent state'; exit 0; }
+rows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-rows.XXXXXX") || { emit 'cannot read agent state'; rm -f "$records"; exit 0; }
+unseen_windows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-unseen.XXXXXX") || { emit 'cannot read agent state'; rm -f "$records" "$rows"; exit 0; }
+render_input=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-render.XXXXXX") || { emit 'cannot read agent state'; rm -f "$records" "$rows" "$unseen_windows"; exit 0; }
 trap 'rm -f "$records" "$rows" "$unseen_windows" "$render_input"' EXIT INT TERM HUP
 
 # Poller self-heal: restart if the recorded pid is missing or stale.
@@ -76,14 +79,14 @@ if [ -z "$poller_pid" ] || ! kill -0 "$poller_pid" 2>/dev/null; then
 fi
 
 if ! "$store_cmd" records > "$records" 2>/dev/null; then
-    emit 'agent-radar: cannot read agent state'
+    emit 'cannot read agent state'
     exit 0
 fi
 
 now=${AGENT_RADAR_NOW:-}
 [ -n "$now" ] || now=$(date +%s)
 if ! "$classify_cmd" "$now" < "$records" 2>/dev/null | sort -t '|' -k1,1n -k3,3 > "$rows"; then
-    emit 'agent-radar: cannot read agent state'
+    emit 'cannot read agent state'
     exit 0
 fi
 
@@ -119,7 +122,7 @@ while IFS= read -r window; do
 done
 
 if [ ! -s "$rows" ]; then
-    emit 'agent-radar: no agent panes'
+    emit 'no agent panes'
     exit 0
 fi
 
@@ -150,7 +153,7 @@ while IFS='|' read -r tier age sortkey pane agent target state stopped_at seen_a
         "$state" "$stopped_at" "$seen_at" "$session" "$win_name" "$branch" >> "$render_input"
 done < "$rows"
 
-awk -v fields="$fields" -v width="$width" -v prefix="$tint_prefix" -v suffix="$tint_suffix" -F '|' '
+awk -v fields="$fields" -v width="$width" -v prefix="$tint_prefix" -v suffix="$tint_suffix" -v label="$label" -F '|' '
 function visible(s,    tmp) {
     tmp = s
     gsub(/#\[[^]]*]/, "", tmp)
@@ -224,11 +227,11 @@ function sep()   { return " " dim("·") " " }
 }
 END {
     if (pane_count == 0) {
-        print prefix "agent-radar: no agent panes" suffix
+        print prefix label "no agent panes" suffix
         exit
     }
     if (npanes == 0) {
-        print ""
+        print prefix label suffix
         exit
     }
 
@@ -239,5 +242,5 @@ END {
         out = candidate
     }
 
-    print prefix out suffix
+    print prefix label out suffix
 }' "$render_input"

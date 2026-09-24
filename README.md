@@ -15,7 +15,7 @@ harness, not just the ones with hooks.
   harness's live working indicator. A pane is `working` while that indicator
   is on screen and flips to `stopped` when it's gone for N seconds.
 - **Notifies you**: an OS notification fires once per stop transition (via `osascript` on macOS, `notify-send` on Linux). A tmux window containing an unseen stopped agent stays highlighted until you focus the exact agent pane.
-- **Shows agent panes at a glance**: a tinted second status row displays bracketed panes with red/yellow/green dots (unseen-stopped, working, seen-stopped) and configurable fields. It does not replace your existing first-row status format.
+- **Shows agent panes at a glance**: a tinted second status row labeled `📡 Agent Radar │` displays bracketed panes with red/yellow/green dots (unseen-stopped, working, seen-stopped) and configurable fields. It does not replace your existing first-row status format.
 - **Navigates**: `prefix + a` opens an fzf popup listing all agent panes,
   stopped ones first, with a red/yellow/green status dot (unseen-stopped,
   running, seen-stopped). Each row is harness, session, window name, `:window.pane`,
@@ -54,7 +54,7 @@ The glance tint defaults to the theme's `@thm_surface_0` when available (for exa
 
 - `prefix + a`: open the navigator popup, select an agent, jump to its pane.
 - `prefix + A`: toggle the glance row for the live tmux server. This does not change `@agent-radar-glance` in your config; sourcing the config restores that setting.
-- The default fields `dot,target` render panes like `[● zeta:1.0] [● other:2.1]`. The installation example uses `dot,session,branch` and renders `[● karakuri · ⎇ main] [● mentormatic · ⎇ feat/spam-stop]`; a missing branch appears as `-`. Panes are separated by a space, while fields within a pane use `·` where applicable.
+- The default fields `dot,target` render `📡 Agent Radar │ [● zeta:1.0] [● other:2.1]`. The installation example uses `dot,session,branch` and renders `📡 Agent Radar │ [● karakuri · ⎇ main] [● mentormatic · ⎇ feat/spam-stop]`; a missing branch appears as `-`. Panes are separated by a space, while fields within a pane use `·` where applicable. The label remains when fewer panes fit on a narrow row.
 - Windows containing unseen stopped agents stay highlighted until you focus the exact pane, even when the glance is toggled off. The plugin does not add to `status-left`.
 
 ## Options

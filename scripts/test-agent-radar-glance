@@ -133,6 +133,7 @@ PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
 
 {
     printf '#[bg=colour8,fill=colour8]#[push-default]'
+    printf '📡 Agent Radar │ '
     printf '[#[fg=red]●#[default] #[bold]zeta#[default]#[dim]:1.0#[default]]'
     printf ' '
     printf '[#[fg=red]●#[default] #[bold]middle#[default]#[dim]:1.0#[default]]'
@@ -168,6 +169,7 @@ PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
 
 {
     printf '#[bg=colour8,fill=colour8]#[push-default]'
+    printf '📡 Agent Radar │ '
     printf '[#[fg=red]●#[default] #[bold]pi#[default] #[dim]·#[default] #[bold]zeta#[default] #[dim]·#[default] #[bold]win-z#[default] #[dim]·#[default] #[dim]⎇ feat/spam-stop#[default] #[dim]30s#[default]]'
     printf ' '
     printf '[#[fg=red]●#[default] #[bold]pi#[default] #[dim]·#[default] #[bold]middle#[default] #[dim]·#[default] #[bold]win-m#[default] #[dim]·#[default] #[dim]⎇ feat/middle#[default] #[dim]25s#[default]]'
@@ -178,6 +180,12 @@ PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
     printf '#[pop-default]\n'
 } > "$tmp/expected-out2"
 diff -u "$tmp/expected-out2" "$tmp/out2"
+
+# --- unknown-only fields: keep the row label ---
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    TEST_FIELDS='unknown' AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out-no-fields"
+printf '%s\n' '#[bg=colour8,fill=colour8]#[push-default]📡 Agent Radar │ #[pop-default]' > "$tmp/expected-no-fields"
+diff -u "$tmp/expected-no-fields" "$tmp/out-no-fields"
 
 # --- off: empty output ---
 : > "$log"
@@ -190,7 +198,7 @@ PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
 : > "$log"
 PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
     AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out4"
-printf '%s\n' '#[bg=colour8,fill=colour8]#[push-default]agent-radar: no agent panes#[pop-default]' > "$tmp/expected-out4"
+printf '%s\n' '#[bg=colour8,fill=colour8]#[push-default]📡 Agent Radar │ no agent panes#[pop-default]' > "$tmp/expected-out4"
 diff -u "$tmp/expected-out4" "$tmp/out4"
 
 # --- cannot read agent state: tmux missing from PATH ---
@@ -200,7 +208,7 @@ diff -u "$tmp/expected-out4" "$tmp/out4"
     PATH=$tmp/corebin
     AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out5"
 )
-printf 'agent-radar: cannot read agent state\n' > "$tmp/expected-out5"
+printf '📡 Agent Radar │ cannot read agent state\n' > "$tmp/expected-out5"
 diff -u "$tmp/expected-out5" "$tmp/out5"
 
 # --- truncation: keep unseen-stopped at the front ---
@@ -225,9 +233,15 @@ EOF
 : > "$log"
 PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
     TEST_WIDTH=20 AGENT_RADAR_NOW=120 "$glance" work 20 > "$tmp/out6"
+grep -F '📡 Agent Radar │ ' "$tmp/out6" >/dev/null || { echo 'narrow row lost its label' >&2; exit 1; }
 grep -F 'zeta' "$tmp/out6" >/dev/null || { echo 'truncation dropped front pane' >&2; exit 1; }
 grep -F 'middle' "$tmp/out6" >/dev/null && { echo 'truncation exceeded width' >&2; exit 1; }
 grep -F 'beta' "$tmp/out6" >/dev/null && { echo 'truncation kept tail pane' >&2; exit 1; }
+
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    AGENT_RADAR_NOW=120 "$glance" work 48 > "$tmp/out6-boundary"
+grep -F 'middle' "$tmp/out6-boundary" >/dev/null || { echo 'second pane should fit after label' >&2; exit 1; }
+grep -F 'alpha' "$tmp/out6-boundary" >/dev/null && { echo 'label width did not reserve space' >&2; exit 1; }
 
 # --- occupied slot: error once ---
 : > "$log"

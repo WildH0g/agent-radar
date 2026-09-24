@@ -67,7 +67,7 @@ TMUX_AGENT_RADAR_PANE_${pane}_STATE=running
 EOF
 rendered=$(AGENT_RADAR_STORE_FILE=$tmp/records AGENT_RADAR_NOW=120 sh "$glance" smoke 160)
 case "$rendered" in '#[bg=colour8,fill=colour8]#[push-default]'*'#[pop-default]') : ;; *) echo 'fallback tint missing' >&2; exit 1 ;; esac
-case "$rendered" in *'#[fg=yellow]●'*) : ;; *) echo 'glance did not emit native status styles' >&2; exit 1 ;; esac
+case "$rendered" in *'📡 Agent Radar │ '*'#[fg=yellow]●'*) : ;; *) echo 'glance label or native status styles missing' >&2; exit 1 ;; esac
 case "$rendered" in *"$(printf '\033')"*) echo 'glance emitted terminal escapes' >&2; exit 1 ;; esac
 
 tmux set-option -gq @thm_surface_0 '#313244'
