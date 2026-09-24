@@ -66,8 +66,17 @@ TMUX_AGENT_RADAR_PANE_${pane}_TARGET=smoke:0.0
 TMUX_AGENT_RADAR_PANE_${pane}_STATE=running
 EOF
 rendered=$(AGENT_RADAR_STORE_FILE=$tmp/records AGENT_RADAR_NOW=120 sh "$glance" smoke 160)
+case "$rendered" in '#[bg=colour8,fill=colour8]#[push-default]'*'#[pop-default]') : ;; *) echo 'fallback tint missing' >&2; exit 1 ;; esac
 case "$rendered" in *'#[fg=yellow]●'*) : ;; *) echo 'glance did not emit native status styles' >&2; exit 1 ;; esac
 case "$rendered" in *"$(printf '\033')"*) echo 'glance emitted terminal escapes' >&2; exit 1 ;; esac
+
+tmux set-option -gq @thm_surface_0 '#313244'
+rendered=$(AGENT_RADAR_STORE_FILE=$tmp/records AGENT_RADAR_NOW=120 sh "$glance" smoke 160)
+case "$rendered" in '#[bg=#313244,fill=#313244]#[push-default]'*) : ;; *) echo 'theme tint missing' >&2; exit 1 ;; esac
+tmux set-option -gq @thm_mantle '#181825'
+tmux set-option -gq @agent-radar-glance-tint '@thm_mantle'
+rendered=$(AGENT_RADAR_STORE_FILE=$tmp/records AGENT_RADAR_NOW=120 sh "$glance" smoke 160)
+case "$rendered" in '#[bg=#181825,fill=#181825]#[push-default]'*) : ;; *) echo 'custom theme tint missing' >&2; exit 1 ;; esac
 
 hook=$(tmux show-hooks -g session-window-changed)
 case "$hook" in *"run-shell -b \"'$tmp/plugin with spaces/scripts/agent-radar-status' '#{session_name}'\""*) : ;;
