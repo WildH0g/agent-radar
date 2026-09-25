@@ -55,7 +55,7 @@ The glance tint defaults to the theme's `@thm_surface_0` when available (for exa
 - `prefix + a`: open the navigator popup, select an agent, jump to its pane.
 - `prefix + A`: toggle the glance row for the live tmux server. This does not change `@agent-radar-glance` in your config; sourcing the config restores that setting.
 - The default fields `dot,target` render `📡 Agent Radar │ [● zeta:1.0] [● other:2.1]`. The installation example uses `dot,session,branch` and renders `📡 Agent Radar │ [● karakuri · ⎇ main] [● mentormatic · ⎇ feat/spam-stop]`; a missing branch appears as `-`. Panes are separated by a space, while fields within a pane use `·` where applicable. The label remains when fewer panes fit on a narrow row.
-- Windows containing unseen stopped agents stay highlighted until you focus the exact pane, even when the glance is toggled off. The plugin does not add to `status-left`.
+- Windows containing unseen stopped agents stay highlighted until you focus the exact pane. With the glance off, highlights and seen marks refresh when you switch windows rather than on every status interval. The plugin does not add to `status-left`.
 
 ## Options
 
