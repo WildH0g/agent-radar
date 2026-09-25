@@ -114,7 +114,11 @@ tmux bind-key "$popup_key" display-popup -E -e TERM=tmux-256color -w "$popup_wid
 tmux run-shell -b "'$current_dir/scripts/agent-radar-poller' start"
 
 # --- Maintenance hook (seen-mark + window highlight) when glance is off ---
-tmux set-hook -g session-window-changed "run-shell -b \"'$current_dir/scripts/agent-radar-status' '#{session_name}'\""
+session_window_changed_hooks=$(tmux show-hooks -g session-window-changed 2>/dev/null || true)
+case "$session_window_changed_hooks" in
+    *agent-radar-status*) ;;
+    *) tmux set-hook -ga session-window-changed "run-shell -b \"'$current_dir/scripts/agent-radar-status' '#{session_name}'\"" ;;
+esac
 
 # --- Toggle the glance line ---
 tmux bind-key A run-shell -b "'$current_dir/scripts/agent-radar-toggle'"

@@ -24,6 +24,7 @@ glance="$tmp/plugin with spaces/scripts/agent-radar-glance"
 tmux -f /dev/null new-session -d -s smoke
 # Keep the isolated poller start guard satisfied without starting a daemon.
 tmux set-option -gq @agent-radar-pid "$$"
+tmux set-hook -g session-window-changed 'display-message "user hook survives"'
 stock=$(tmux show-option -gqv 'status-format[1]')
 
 for custom in 'custom #{pane_index}' 'custom #{pane_width}x#{pane_height}'; do
@@ -36,6 +37,13 @@ for custom in 'custom #{pane_index}' 'custom #{pane_width}x#{pane_height}'; do
         echo 'occupied row increased the status count' >&2; exit 1
     }
 done
+
+hook=$(tmux show-hooks -g session-window-changed)
+case "$hook" in *'display-message "user hook survives"'*) : ;; *)
+    echo 'plugin replaced the pre-existing session-window-changed hook' >&2; exit 1
+esac
+agent_hook_count=$(printf '%s\n' "$hook" | awk '/agent-radar-status/ { count++ } END { print count + 0 }')
+[ "$agent_hook_count" -eq 1 ] || { echo 'loading twice left a duplicate agent-radar hook' >&2; exit 1; }
 
 tmux set-option -g 'status-format[1]' "$stock"
 sh "$plugin"
