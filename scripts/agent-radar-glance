@@ -150,10 +150,11 @@ while IFS='|' read -r tier age sortkey pane agent target state stopped_at seen_a
         "$state" "$stopped_at" "$seen_at" "$session" "$win_name" "$branch" >> "$render_input"
 done < "$rows"
 
-awk -v fields="$fields" -v width="$width" -v prefix="$tint_prefix" -v suffix="$tint_suffix" -v label="$label" -F '|' '
+LC_ALL=C awk -v fields="$fields" -v width="$width" -v prefix="$tint_prefix" -v suffix="$tint_suffix" -v label="$label" -F '|' '
 function visible(s,    tmp) {
     tmp = s
     gsub(/#\[[^]]*]/, "", tmp)
+    gsub(/[\200-\277]/, "", tmp)
     return length(tmp)
 }
 function bold(s) { return "#[bold]" s "#[default]" }

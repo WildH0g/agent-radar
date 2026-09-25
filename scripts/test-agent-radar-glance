@@ -243,6 +243,33 @@ PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
 grep -F 'middle' "$tmp/out6-boundary" >/dev/null || { echo 'second pane should fit after label' >&2; exit 1; }
 grep -F 'alpha' "$tmp/out6-boundary" >/dev/null && { echo 'label width did not reserve space' >&2; exit 1; }
 
+# --- 66 = 17-column label + five 9-column cards + four spaces ---
+cat > "$env" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%one_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%one_TARGET=s:1.0
+TMUX_AGENT_RADAR_PANE_%one_STATE=running
+TMUX_AGENT_RADAR_PANE_%two_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%two_TARGET=s:2.0
+TMUX_AGENT_RADAR_PANE_%two_STATE=running
+TMUX_AGENT_RADAR_PANE_%three_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%three_TARGET=s:3.0
+TMUX_AGENT_RADAR_PANE_%three_STATE=running
+TMUX_AGENT_RADAR_PANE_%four_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%four_TARGET=s:4.0
+TMUX_AGENT_RADAR_PANE_%four_STATE=running
+TMUX_AGENT_RADAR_PANE_%five_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%five_TARGET=s:5.0
+TMUX_AGENT_RADAR_PANE_%five_STATE=running
+EOF
+: > "$log"
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    AGENT_RADAR_NOW=120 "$glance" work 66 > "$tmp/out-width-66"
+for target in :1.0 :2.0 :3.0 :4.0 :5.0; do
+    grep -F "#[bold]s#[default]#[dim]$target#[default]" "$tmp/out-width-66" >/dev/null || {
+        echo "width 66 dropped card $target" >&2; exit 1;
+    }
+done
+
 # --- occupied slot: error once ---
 : > "$log"
 PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
