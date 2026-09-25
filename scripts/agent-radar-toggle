@@ -38,7 +38,11 @@ case "$state" in
             ''|on|1) orig_status=1 ;;
         esac
         if [ "$current_status" = "$glance_row" ] && [ "$orig_status" -lt "$glance_row" ] 2>/dev/null; then
-            tmux set-option -g status on
+            if [ "$orig_status" -eq 1 ]; then
+                tmux set-option -g status on
+            else
+                tmux set-option -g status "$orig_status"
+            fi
         fi
 
         tmux set-option -gq @agent-radar-glance-state off

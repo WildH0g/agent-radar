@@ -19,7 +19,7 @@ case "$1" in
             @agent-radar-glance-state) printf '%s\n' "${TEST_STATE:-off}" ;;
             @agent-radar-glance-row) printf '%s\n' "${TEST_ROW:-2}" ;;
             @agent-radar-glance-orig-status) printf '%s\n' "${TEST_ORIG_STATUS:-}" ;;
-            status-format\[1\]) printf '%s\n' "${TEST_SLOT:-}" ;;
+            status-format\[1\]|status-format\[2\]) printf '%s\n' "${TEST_SLOT:-}" ;;
             status) printf '%s\n' "${TEST_STATUS:-on}" ;;
             *) exit 0 ;;
         esac
@@ -111,5 +111,14 @@ grep -F 'set-option -g status-format[1] #[align=centre]#{P:#{?pane_active,#[reve
 if grep -F 'set-option -g status on' "$log" >/dev/null; then
     echo 'toggle off lowered status when user originally had 2 lines' >&2; exit 1
 fi
+
+# --- on -> off: restore a numeric baseline below the glance row ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_ROW=3 TEST_STATUS=3 TEST_ORIG_STATUS=2 \
+    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    "$toggle"
+grep -F 'set-option -g status 2' "$log" >/dev/null || {
+    echo 'toggle off did not restore the original status count of 2' >&2; exit 1
+}
 
 printf 'agent-radar-toggle ok\n'
