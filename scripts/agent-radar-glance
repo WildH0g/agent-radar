@@ -15,9 +15,6 @@ opt() {
     [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
 }
 
-glance=$(opt @agent-radar-glance on)
-[ "$glance" = on ] || exit 0
-
 glance_row=$(opt @agent-radar-glance-row 2)
 case "$glance_row" in
     ''|*[!0-9]*) glance_row=2 ;;

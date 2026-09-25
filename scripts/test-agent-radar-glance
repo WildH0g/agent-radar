@@ -187,11 +187,11 @@ PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
 printf '%s\n' '#[bg=colour8,fill=colour8]#[push-default]📡 Agent Radar │ #[pop-default]' > "$tmp/expected-no-fields"
 diff -u "$tmp/expected-no-fields" "$tmp/out-no-fields"
 
-# --- off: empty output ---
+# --- the live row still renders when the reload setting is off ---
 : > "$log"
 PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
     TEST_GLANCE=off AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out3"
-[ -z "$(cat "$tmp/out3")" ] || { echo 'glance off produced output' >&2; exit 1; }
+diff -u "$tmp/expected-out" "$tmp/out3"
 
 # --- no agent panes ---
 : > "$env"
