@@ -17,3 +17,5 @@ Accepted cost: an install whose second-line format is still stock gains a visibl
 This note does not choose the exact wording of those messages, the toggle command's name, or how the highlight and the seen mark share code with the old segment or the navigator. It does not change detection, the navigator popup, its order, its jump, notify, or sound.
 
 Reopen this if tmux stops using `status` `2` plus `status-format[1]` for a second line, if that slot's stock text is ever shown while `status` is `on`, or if a theme or status plugin owns the second line by default. Wanting the glance back in `status-left` is not a trigger. tmux 3.7 changed the stock text and prompted a review. The decision stands, because the new default is also shown only when `status` is 2 or more.
+
+`docs/adr/glance-text-user-option.md` retires the claim that, with the glance on, its render keeps the window highlight and the seen mark on the `status-interval`. The row decision in this note stands.
