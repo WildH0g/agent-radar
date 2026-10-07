@@ -4,6 +4,8 @@ set -eu
 
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
 toggle=$script_dir/agent-radar-toggle
+glance_pidfile=$("$script_dir/agent-radar-heartbeat" pid-file)
+glance_owned="#{@agent-radar-glance-text}#('$script_dir/agent-radar-heartbeat' '$glance_pidfile')"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-toggle-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT INT TERM HUP
 
@@ -45,7 +47,7 @@ chmod +x "$tmp/bin/tmux"
 PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=off TEST_STATUS=on \
     "$toggle"
 
-grep -F "set-option -g status-format[1] #('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" "$log" >/dev/null || {
+grep -F "set-option -g status-format[1] $glance_owned" "$log" >/dev/null || {
     echo 'toggle on did not write glance format' >&2
     cat "$log"
     exit 1
@@ -74,7 +76,7 @@ fi
 # --- on -> off: restore stock slot and lower status (we raised it) ---
 : > "$log"
 PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=1 \
-    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    TEST_SLOT="$glance_owned" \
     "$toggle"
 grep -F 'set-option -g status-format[1] #[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }' "$log" >/dev/null || {
     echo 'toggle off did not restore stock slot' >&2; exit 1
@@ -84,6 +86,17 @@ grep -F 'set-option -g status on' "$log" >/dev/null || {
 }
 grep -F 'set-option -gq @agent-radar-glance-state off' "$log" >/dev/null || {
     echo 'toggle off did not clear live state' >&2; exit 1
+}
+
+# --- on -> off: release the pre-update plugin slot, keep the stock baseline ---
+old_owned="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')"
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=1 \
+    TEST_ORIG_FORMAT='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }' \
+    TEST_SLOT="$old_owned" \
+    "$toggle"
+grep -F 'set-option -g status-format[1] #[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }' "$log" >/dev/null || {
+    echo 'toggle off did not release the pre-update glance slot' >&2; exit 1
 }
 
 # --- on -> off: slot changed by user, still lower status if we raised it ---
@@ -100,7 +113,7 @@ grep -F 'set-option -g status on' "$log" >/dev/null || {
 # --- on -> off: do not lower status when current count differs from row ---
 : > "$log"
 PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=3 TEST_ORIG_STATUS=1 \
-    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    TEST_SLOT="$glance_owned" \
     "$toggle"
 if grep -F 'set-option -g status' "$log" | grep -v 'status-format' >/dev/null; then
     echo 'toggle off changed status when user had 3 lines' >&2; exit 1
@@ -109,7 +122,7 @@ fi
 # --- on -> off: do not lower status if the user already had this many lines ---
 : > "$log"
 PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=2 \
-    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    TEST_SLOT="$glance_owned" \
     "$toggle"
 grep -F 'set-option -g status-format[1] #[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }' "$log" >/dev/null || {
     echo 'toggle off did not restore stock slot' >&2; exit 1
@@ -121,7 +134,7 @@ fi
 # --- on -> off: restore a numeric baseline below the glance row ---
 : > "$log"
 PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_ROW=3 TEST_STATUS=3 TEST_ORIG_STATUS=2 \
-    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    TEST_SLOT="$glance_owned" \
     "$toggle"
 grep -F 'set-option -g status 2' "$log" >/dev/null || {
     echo 'toggle off did not restore the original status count of 2' >&2; exit 1
@@ -131,7 +144,7 @@ grep -F 'set-option -g status 2' "$log" >/dev/null || {
 stock_37='#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }'
 : > "$log"
 PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=off TEST_SLOT="$stock_37" "$toggle"
-grep -F "set-option -g status-format[1] #('$script_dir/agent-radar-glance'" "$log" >/dev/null || {
+grep -F "set-option -g status-format[1] $glance_owned" "$log" >/dev/null || {
     echo 'toggle on did not claim a row holding the tmux 3.7 default' >&2; exit 1
 }
 grep -F "set-option -gq @agent-radar-glance-orig-format $stock_37" "$log" >/dev/null || {
@@ -140,7 +153,7 @@ grep -F "set-option -gq @agent-radar-glance-orig-format $stock_37" "$log" >/dev/
 : > "$log"
 PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=1 \
     TEST_ORIG_FORMAT="$stock_37" \
-    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    TEST_SLOT="$glance_owned" \
     "$toggle"
 grep -F "set-option -g status-format[1] $stock_37" "$log" >/dev/null || {
     echo 'toggle off did not restore the kept row text' >&2; exit 1

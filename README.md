@@ -36,7 +36,7 @@ the ones that have no hooks.
 <table>
   <tr>
     <td width="33%" valign="top">
-      <h4>📡 Glance row</h4>
+      <h4>󰐷 Glance row</h4>
       An extra status row lists every agent pane with a status dot. It sits below
       your own status line and doesn't replace it.
     </td>
@@ -140,17 +140,17 @@ own count and pick a free row with `@agent-radar-glance-row`.
 
 ![Glance row](assets/glance-status-line.png)
 
-The row is labeled `📡 Agent Radar │` and shows one bracketed entry per agent
+The row is labeled `󰐷 Agent Radar │` and shows one bracketed entry per agent
 pane. The default fields `dot,target` look like this:
 
 ```text
-📡 Agent Radar │ [● zeta:1.0] [● other:2.1]
+󰐷 Agent Radar │ [● zeta:1.0] [● other:2.1]
 ```
 
 With `dot,session,branch`, as in the install example, it looks like this:
 
 ```text
-📡 Agent Radar │ [● karakuri · ⎇ main] [● mentormatic · ⎇ feat/spam-stop]
+󰐷 Agent Radar │ [● karakuri · ⎇ main] [● mentormatic · ⎇ feat/spam-stop]
 ```
 
 A pane without a Git branch shows `-`. When the row is too narrow, fewer panes

@@ -15,6 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The upgrade regression installs the archived base commit with
+          # `git archive`; a depth-1 clone does not contain it.
+          fetch-depth: 0
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
       - name: Run test scripts

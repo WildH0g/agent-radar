@@ -149,6 +149,11 @@ done
 
 [ -n "$new_pid" ] || { echo 'start() never took over a dead pid' >&2; exit 1; }
 kill -0 "$new_pid" 2>/dev/null || { echo 'start() recorded a pid that is not actually running' >&2; exit 1; }
+live_file=$("$script_dir/agent-radar-heartbeat" pid-file)
+[ "$(cat "$live_file" 2>/dev/null || true)" = "$new_pid" ] || {
+    echo 'start() did not write the heartbeat pid file' >&2
+    exit 1
+}
 
 kill "$new_pid" 2>/dev/null || true
 tries=0
@@ -649,5 +654,65 @@ if wait_for "$afplay_log" 1 50 || [ -f "$afplay_log" ]; then
     echo 'both off: sound was emitted' >&2
     exit 1
 fi
+
+# glance on: the poller writes the user option. The status job must not.
+glance_case=$tmp/glance-write
+mkdir -p "$glance_case/bin"
+glance_log=$glance_case/tmux.log
+: > "$glance_log"
+: > "$glance_case/store"
+cat > "$glance_case/bin/tmux" <<EOF
+#!/usr/bin/env sh
+printf '%s\n' "\$*" >> "$glance_log"
+case "\$1" in
+    show-option)
+        case "\$3" in
+            @agent-radar-glance-state) printf 'on\n' ;;
+        esac
+        ;;
+esac
+exit 0
+EOF
+chmod +x "$glance_case/bin/tmux"
+PATH=$glance_case/bin:"$PATH" AGENT_RADAR_STORE_FILE=$glance_case/store "$poller" once
+grep -F -- '-- @agent-radar-glance-text' "$glance_log" >/dev/null || {
+    echo 'poller did not write @agent-radar-glance-text' >&2
+    exit 1
+}
+grep -F 'Agent Radar' "$glance_log" >/dev/null || {
+    echo 'glance option was not the rendered line' >&2
+    exit 1
+}
+
+# A focused stopped pane is marked seen before the row is drawn, so the dot is green.
+seen_case=$tmp/seen
+mkdir -p "$seen_case/bin"
+seen_log=$seen_case/tmux.log
+: > "$seen_log"
+cat > "$seen_case/store" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%9_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%9_TARGET=ag-radar:1.0
+TMUX_AGENT_RADAR_PANE_%9_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%9_STOPPED_AT=50
+EOF
+cat > "$seen_case/bin/tmux" <<EOF
+#!/usr/bin/env sh
+printf '%s\n' "\$*" >> "$seen_log"
+case "\$1" in
+    show-option)
+        case "\$3" in
+            @agent-radar-glance-state) printf 'on\n' ;;
+        esac
+        ;;
+    list-clients) printf '%s\n' '%9' ;;
+esac
+exit 0
+EOF
+chmod +x "$seen_case/bin/tmux"
+PATH=$seen_case/bin:"$PATH" AGENT_RADAR_STORE_FILE=$seen_case/store "$poller" once
+grep -F 'set-environment -g TMUX_AGENT_RADAR_PANE_%9_SEEN_STOPPED_AT 50' "$seen_log" >/dev/null || {
+    echo 'focused stopped pane was not marked seen' >&2
+    exit 1
+}
 
 printf 'agent-radar-poller ok\n'

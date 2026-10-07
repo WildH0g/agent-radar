@@ -1,0 +1,221 @@
+#!/usr/bin/env sh
+# Upgrade regression: install the archived base, update the same plugin path in
+# place, and reload. Covers both accepted Spec findings — the old glance row
+# slot must migrate to the poller-written option, and the live pre-update
+# daemon must be replaced so the new heartbeat contract initializes.
+set -eu
+
+repo_dir=$(CDPATH='' cd "$(dirname "$0")/.." && pwd -P) || exit 1
+base_oid=66ae8c87e90461176c41107a219b4277b12fa3c4
+real_tmux=$(command -v tmux) || { echo 'tmux is required' >&2; exit 1; }
+
+# A shallow checkout (CI default) has no base commit object. Skipping keeps the
+# suite honest instead of silently testing nothing.
+if ! git -C "$repo_dir" cat-file -e "${base_oid}^{commit}" 2>/dev/null; then
+    printf 'agent-radar-upgrade skipped: base commit %s is not in this clone\n' "$base_oid"
+    exit 0
+fi
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-upgrade-test.XXXXXX") || exit 1
+tmp=$(CDPATH='' cd "$tmp" && pwd -P) || exit 1
+socket="agent-radar-upgrade-${tmp##*.}"
+daemon_pid=
+cleanup() {
+    [ -n "${daemon_pid:-}" ] && kill "$daemon_pid" 2>/dev/null || true
+    tmux kill-server >/dev/null 2>&1 || true
+    rm -rf "$tmp"
+}
+trap cleanup EXIT INT TERM HUP
+
+fail() {
+    printf '%s\n' "$1" >&2
+    exit 1
+}
+
+mkdir "$tmp/bin"
+cat > "$tmp/bin/tmux" <<EOF
+#!/usr/bin/env sh
+exec "$real_tmux" -L "$socket" "\$@"
+EOF
+chmod +x "$tmp/bin/tmux"
+PATH=$tmp/bin:$PATH; export PATH
+TMUX_TMPDIR=$tmp; export TMUX_TMPDIR
+unset TMUX
+
+# Wait for an @agent-radar-pid that is live and different from $1. Echoes it.
+wait_for_pid() {
+    _prev=$1
+    _n=0
+    while [ "$_n" -lt 100 ]; do
+        _cur=$(tmux show-option -gqv @agent-radar-pid 2>/dev/null || true)
+        if [ -n "$_cur" ] && [ "$_cur" != "$_prev" ] && kill -0 "$_cur" 2>/dev/null; then
+            printf '%s\n' "$_cur"
+            return 0
+        fi
+        _n=$((_n + 1))
+        sleep 0.1
+    done
+    return 1
+}
+
+wait_for_death() {
+    _pid=$1
+    _n=0
+    while [ "$_n" -lt 100 ]; do
+        kill -0 "$_pid" 2>/dev/null || return 0
+        _n=$((_n + 1))
+        sleep 0.1
+    done
+    return 1
+}
+
+install_base() {
+    _dir=$1
+    mkdir -p "$_dir"
+    git -C "$repo_dir" archive "$base_oid" agent-radar.tmux scripts | tar -x -C "$_dir"
+}
+
+update_in_place() {
+    _dir=$1
+    cp "$repo_dir/agent-radar.tmux" "$_dir/agent-radar.tmux"
+    for _f in "$repo_dir/scripts/"*; do
+        cp "$_f" "$_dir/scripts/"
+    done
+}
+
+tmux -f /dev/null new-session -d -s upgrade
+server_pid=$(tmux display-message -p '#{pid}')
+live_env="x,$server_pid,0"
+stock=$(tmux show-option -gqv 'status-format[1]')
+
+# --- Install the archived base version on the plugin path ------------------
+plugin=$tmp/plugin
+install_base "$plugin"
+old_format="#('$plugin/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')"
+
+TMUX=$live_env sh "$plugin/agent-radar.tmux"
+
+[ "$(tmux show-option -gqv 'status-format[1]')" = "$old_format" ] || {
+    fail 'base install did not claim the pre-update glance slot'
+}
+[ "$(tmux show-option -gqv @agent-radar-glance-orig-status)" = on ] || {
+    fail 'base install did not record the original row count'
+}
+[ "$(tmux show-option -gqv @agent-radar-glance-orig-format)" = "$stock" ] || {
+    fail 'base install did not record the original row text'
+}
+
+old_pid=$(wait_for_pid '') || fail 'base install never started a live poller'
+daemon_pid=$old_pid
+[ "$(tmux show-option -gqv status)" = 2 ] || fail 'base install did not raise the status count'
+
+# --- Update the same plugin path in place, then reload ---------------------
+update_in_place "$plugin"
+TMUX=$live_env sh "$plugin/agent-radar.tmux"
+
+new_slot=$(tmux show-option -gqv 'status-format[1]')
+case "$new_slot" in
+    '#{@agent-radar-glance-text}'*) : ;;
+    *) fail "old glance slot was not migrated: $new_slot" ;;
+esac
+[ "$(tmux show-option -gqv @agent-radar-glance-orig-format)" = "$stock" ] || {
+    fail 'upgrade overwrote the kept original row text with the old renderer format'
+}
+[ "$(tmux show-option -gqv @agent-radar-glance-orig-status)" = on ] || {
+    fail 'upgrade overwrote the kept original row count'
+}
+
+new_pid=$(wait_for_pid "$old_pid") || fail 'reload did not start a live replacement poller'
+daemon_pid=$new_pid
+[ "$new_pid" != "$old_pid" ] || fail 'reload kept the pre-update poller'
+kill -0 "$new_pid" 2>/dev/null || fail 'replacement poller is not running'
+wait_for_death "$old_pid" || fail 'pre-update poller was left running alongside the replacement'
+
+pidfile=$(TMUX=$live_env "$plugin/scripts/agent-radar-heartbeat" pid-file)
+[ -f "$pidfile" ] || fail "replacement poller did not write its pid file: $pidfile"
+[ "$(cat "$pidfile")" = "$new_pid" ] || fail 'pid file does not match the live replacement poller'
+
+n=0
+text=
+while [ "$n" -lt 100 ]; do
+    text=$(tmux show-option -gqv @agent-radar-glance-text 2>/dev/null || true)
+    case "$text" in *'Agent Radar'*) break ;; esac
+    n=$((n + 1))
+    sleep 0.1
+done
+case "$text" in
+    *'Agent Radar'*) : ;;
+    *) fail "replacement poller did not populate @agent-radar-glance-text: $text" ;;
+esac
+
+# --- Healthy heartbeat is silent and tmux-free -----------------------------
+mkdir "$tmp/fakebin"
+cat > "$tmp/fakebin/tmux" <<EOF
+#!/usr/bin/env sh
+printf '%s\n' "\$*" >> "$tmp/heartbeat-tmux.log"
+exit 1
+EOF
+chmod +x "$tmp/fakebin/tmux"
+: > "$tmp/heartbeat-tmux.log"
+hb_out=$(PATH=$tmp/fakebin:$PATH TMUX=$live_env "$plugin/scripts/agent-radar-heartbeat" 2>"$tmp/heartbeat.err" || true)
+[ -z "$hb_out" ] || fail 'healthy heartbeat printed to stdout'
+[ ! -s "$tmp/heartbeat-tmux.log" ] || fail 'healthy heartbeat called tmux'
+
+# --- Re-source idempotence: one hook, one daemon, each reload --------------
+hook_count=$(tmux show-hooks -g session-window-changed | awk '/agent-radar-status/ { count++ } END { print count + 0 }')
+[ "$hook_count" -eq 1 ] || fail "re-site left $hook_count agent-radar hooks"
+
+TMUX=$live_env sh "$plugin/agent-radar.tmux"
+second_pid=$(wait_for_pid "$new_pid") || fail 'second reload did not replace the poller'
+daemon_pid=$second_pid
+wait_for_death "$new_pid" || fail 'second reload left the first replacement running'
+hook_count=$(tmux show-hooks -g session-window-changed | awk '/agent-radar-status/ { count++ } END { print count + 0 }')
+[ "$hook_count" -eq 1 ] || fail "second re-source left $hook_count agent-radar hooks"
+
+# --- Hiding the row restores the stock slot and the original count ---------
+TMUX=$live_env sh "$plugin/scripts/agent-radar-toggle"
+[ "$(tmux show-option -gqv 'status-format[1]')" = "$stock" ] || {
+    fail 'hiding the upgraded row did not restore the stock slot'
+}
+[ "$(tmux show-option -gqv status)" = on ] || {
+    fail 'hiding the upgraded row did not restore the original count'
+}
+
+# --- A genuinely custom slot is never overwritten --------------------------
+tmux set-option -g 'status-format[1]' 'custom #{pane_index}'
+TMUX=$live_env sh "$plugin/agent-radar.tmux"
+[ "$(tmux show-option -gqv 'status-format[1]')" = 'custom #{pane_index}' ] || {
+    fail 'reload overwrote a custom row'
+}
+[ "$(tmux show-option -gqv status)" = on ] || fail 'reload changed the count for a custom row'
+
+# --- Off-setting upgrade teardown releases the old slot --------------------
+tmux set-option -g 'status-format[1]' "$stock"
+tmux set-option -gu @agent-radar-glance-orig-format 2>/dev/null || true
+tmux set-option -gu @agent-radar-glance-orig-status 2>/dev/null || true
+tmux set-option -gu @agent-radar-glance-state 2>/dev/null || true
+
+plugin_off=$tmp/plugin-off
+install_base "$plugin_off"
+TMUX=$live_env sh "$plugin_off/agent-radar.tmux"
+off_old="#('$plugin_off/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')"
+[ "$(tmux show-option -gqv 'status-format[1]')" = "$off_old" ] || {
+    fail 'off-case base install did not claim its pre-update slot'
+}
+
+update_in_place "$plugin_off"
+tmux set-option -gq @agent-radar-glance off
+TMUX=$live_env sh "$plugin_off/agent-radar.tmux"
+off_pid=$(wait_for_pid "$daemon_pid") || fail 'off-case reload did not replace the poller'
+daemon_pid=$off_pid
+[ "$(tmux show-option -gqv 'status-format[1]')" = "$stock" ] || {
+    fail 'reload with glance off did not release the pre-update slot'
+}
+[ "$(tmux show-option -gqv status)" = on ] || {
+    fail 'reload with glance off did not restore the original count'
+}
+[ -z "$(tmux show-option -gqv @agent-radar-glance-state 2>/dev/null || true)" ] || {
+    fail 'reload with glance off left the live state set'
+}
+
+printf 'agent-radar-upgrade ok\n'

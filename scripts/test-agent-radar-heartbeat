@@ -1,0 +1,60 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+heartbeat=$script_dir/agent-radar-heartbeat
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-heartbeat-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+file=$("$heartbeat" pid-file)
+case $file in
+    */agent-radar-poller.[0-9]*) ;;
+    *) echo "pid-file is not a server pid path: $file" >&2; exit 1 ;;
+esac
+
+mkdir "$tmp/bin"
+cat > "$tmp/bin/tmux" <<EOF
+#!/usr/bin/env sh
+echo "tmux called: \$*" >> "$tmp/tmux.log"
+exit 1
+EOF
+chmod +x "$tmp/bin/tmux"
+
+live=$tmp/live
+printf '%s\n' "$$" > "$live"
+out=$(PATH=$tmp/bin:$PATH "$heartbeat" "$live" 2>"$tmp/err" || true)
+[ -z "$out" ] || { echo 'live heartbeat printed on stdout' >&2; exit 1; }
+if [ -s "$tmp/tmux.log" ]; then
+    echo 'live heartbeat called tmux' >&2
+    exit 1
+fi
+
+cat > "$tmp/bin/tmux" <<EOF
+#!/usr/bin/env sh
+printf '%s\n' "\$*" >> "$tmp/tmux.log"
+exit 0
+EOF
+chmod +x "$tmp/bin/tmux"
+: > "$tmp/tmux.log"
+dead=$tmp/dead
+printf '%s\n' 999999999 > "$dead"
+out=$(PATH=$tmp/bin:$PATH "$heartbeat" "$dead")
+[ -z "$out" ] || { echo 'dead heartbeat printed on stdout' >&2; exit 1; }
+grep -F "run-shell -b" "$tmp/tmux.log" >/dev/null || {
+    echo 'dead heartbeat did not run-shell -b' >&2
+    exit 1
+}
+grep -F "agent-radar-poller' start" "$tmp/tmux.log" >/dev/null || {
+    echo 'dead heartbeat did not single-quote the poller path' >&2
+    exit 1
+}
+
+: > "$tmp/tmux.log"
+out=$(PATH=$tmp/bin:$PATH "$heartbeat" "$tmp/missing")
+[ -z "$out" ] || { echo 'missing-pid heartbeat printed on stdout' >&2; exit 1; }
+grep -F "run-shell -b" "$tmp/tmux.log" >/dev/null || {
+    echo 'missing pid file did not start the poller' >&2
+    exit 1
+}
+
+printf 'agent-radar-heartbeat ok\n'

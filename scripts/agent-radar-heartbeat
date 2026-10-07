@@ -1,0 +1,38 @@
+#!/usr/bin/env sh
+# shellcheck shell=sh disable=SC1007
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 0
+
+# $TMUX is socket,server-pid,session. A status #() may not have it, so the
+# installed format passes the path. pid-file is how installers and the poller agree.
+server_pid=0
+case ${TMUX:-} in
+    *,*,*)
+        rest=${TMUX#*,}
+        server_pid=${rest%%,*}
+        ;;
+esac
+case $server_pid in
+    ''|*[!0-9]*) server_pid=0 ;;
+esac
+pidfile=${TMPDIR:-/tmp}/agent-radar-poller.$server_pid
+
+case ${1:-} in
+    pid-file)
+        printf '%s\n' "$pidfile"
+        exit 0
+        ;;
+esac
+
+target=${1:-$pidfile}
+pid=
+if [ -f "$target" ]; then
+    pid=$(cat "$target" 2>/dev/null || true)
+fi
+# Healthy path: no tmux, no stdout. The status line is the user option alone.
+if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    exit 0
+fi
+tmux run-shell -b "'$script_dir/agent-radar-poller' start" >/dev/null 2>&1 || true
+exit 0
