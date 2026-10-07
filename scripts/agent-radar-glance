@@ -105,16 +105,18 @@ while IFS='|' read -r tier age sortkey pane agent target state stopped_at seen_a
 done < "$rows"
 
 # Sync window-highlight flags: clear everywhere, then set on unseen-stopped windows.
-tmux list-windows -a -F '#{session_name}:#{window_index}' 2>/dev/null |
+windows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-windows.XXXXXX") || exit 0
+tmux list-windows -a -F '#{session_name}:#{window_index}' > "$windows" 2>/dev/null || true
 while IFS= read -r window; do
     [ -n "$window" ] || continue
-    tmux set-window-option -t "$window" -qu @agent-radar-window-stopped 2>/dev/null || true
-done
+    tmux set-window-option -t "$window" -qu @agent-radar-window-stopped </dev/null 2>/dev/null || true
+done < "$windows"
+rm -f "$windows"
 
 sort -u "$unseen_windows" |
 while IFS= read -r window; do
     [ -n "$window" ] || continue
-    tmux set-window-option -t "$window" -q @agent-radar-window-stopped 1 2>/dev/null || true
+    tmux set-window-option -t "$window" -q @agent-radar-window-stopped 1 </dev/null 2>/dev/null || true
 done
 
 if [ ! -s "$rows" ]; then

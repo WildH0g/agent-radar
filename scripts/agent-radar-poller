@@ -39,9 +39,33 @@ pid_unset() {
     rm -f "$file"
 }
 
+# A focused stopped pane is seen. The status job used to do this; the poller
+# has no session argument, and passing one would hide that pane from every client.
+mark_focused_seen() {
+    records=$("$store_cmd" records 2>/dev/null || true)
+    [ -n "$records" ] || return 0
+    # A pipe into this loop deadlocks: tmux inside the loop waits on the server
+    # while list-clients still holds it. Read the list first.
+    clients=$(mktemp "${TMPDIR:-/tmp}/agent-radar-clients.XXXXXX") || return 0
+    tmux list-clients -F '#{pane_id}' > "$clients" 2>/dev/null || true
+    while IFS= read -r pane; do
+        [ -n "$pane" ] || continue
+        stopped=$(printf '%s\n' "$records" | awk -F '|' \
+            -v pane="$pane" \
+            -v col_pane="$agent_radar_record_col_pane" \
+            -v col_state="$agent_radar_record_col_state" \
+            -v col_stopped="$agent_radar_record_col_stopped_at" \
+            '$col_pane == pane && $col_state == "stopped" { print $col_stopped; exit }')
+        [ -n "$stopped" ] || continue
+        "$store_cmd" set "$pane" seen_stopped_at "$stopped" >/dev/null 2>&1 || true
+    done < "$clients"
+    rm -f "$clients"
+}
+
 # Width is unused: the terminal clips. 99999 is past any real line.
 write_glance_text() {
     [ "$(opt @agent-radar-glance-state off)" = on ] || return 0
+    mark_focused_seen || true
     line=$("$script_dir/agent-radar-glance" '' 99999 2>/dev/null | tr -d '\n' || true)
     tmux set-option -gq -- @agent-radar-glance-text "$line" || true
 }
@@ -177,7 +201,9 @@ poll_once() {
     records_file=$(mktemp "${TMPDIR:-/tmp}/agent-radar-records.XXXXXX") || exit 1
     "$store_cmd" records > "$records_file"
 
-    tmux list-panes -a -F '#{pane_id}|#{session_name}:#{window_index}.#{pane_index}|#{pane_tty}' 2>/dev/null |
+    # Same deadlock: capture-pane inside a list-panes pipe holds the server.
+    panes=$(mktemp "${TMPDIR:-/tmp}/agent-radar-panes.XXXXXX") || exit 1
+    tmux list-panes -a -F '#{pane_id}|#{session_name}:#{window_index}.#{pane_index}|#{pane_tty}' > "$panes" 2>/dev/null || true
     while IFS='|' read -r pane target tty; do
         agent=$(agent_for_tty "$tty" "$allow" || true)
         [ -n "$agent" ] || continue
@@ -209,7 +235,8 @@ EOF
         if [ "$notify" = 1 ]; then
             notify_stopped "$agent" "$target"
         fi
-    done
+    done < "$panes"
+    rm -f "$panes"
 
     cut -d '|' -f 1 "$records_file" |
     while IFS= read -r pane; do
