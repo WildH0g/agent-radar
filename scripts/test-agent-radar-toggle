@@ -88,6 +88,17 @@ grep -F 'set-option -gq @agent-radar-glance-state off' "$log" >/dev/null || {
     echo 'toggle off did not clear live state' >&2; exit 1
 }
 
+# --- on -> off: release the pre-update plugin slot, keep the stock baseline ---
+old_owned="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')"
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=1 \
+    TEST_ORIG_FORMAT='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }' \
+    TEST_SLOT="$old_owned" \
+    "$toggle"
+grep -F 'set-option -g status-format[1] #[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }' "$log" >/dev/null || {
+    echo 'toggle off did not release the pre-update glance slot' >&2; exit 1
+}
+
 # --- on -> off: slot changed by user, still lower status if we raised it ---
 : > "$log"
 PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=1 \

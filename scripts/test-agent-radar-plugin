@@ -77,7 +77,7 @@ grep -F "scripts/agent-radar-list'" "$log" >/dev/null || {
     echo 'popup binding does not single-quote the list script path (breaks on plugin paths with spaces)' >&2
     exit 1
 }
-grep -F "run-shell -b '" "$log" | grep -F "scripts/agent-radar-poller' start" >/dev/null || {
+grep -F "run-shell -b '" "$log" | grep -F "scripts/agent-radar-poller' restart" >/dev/null || {
     echo 'poller spawn does not single-quote the script path (run-shell goes through sh -c; breaks on plugin paths with spaces)' >&2
     exit 1
 }
@@ -138,6 +138,23 @@ grep -F 'set-option -gq @agent-radar-glance-state on' "$log" >/dev/null || {
 }
 if grep -F 'set-option -gq @agent-radar-glance-orig-status 2' "$log" >/dev/null; then
     echo 'reload replaced the original one-row baseline with two rows' >&2; exit 1
+fi
+
+# --- Pre-update slot is this plugin's own runtime state and migrates ---
+old_owned="#('$repo_dir/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')"
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATUS=2 TEST_ORIG_STATUS=on \
+    TEST_ORIG_FORMAT='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }' \
+    TEST_SLOT="$old_owned" \
+    "$repo_dir/agent-radar.tmux"
+grep -F "set-option -g status-format[1] $glance_owned" "$log" >/dev/null || {
+    echo 'pre-update glance slot was not migrated to the poller option' >&2; exit 1
+}
+if grep -F 'set-option -gq @agent-radar-glance-orig-format' "$log" >/dev/null; then
+    echo 'pre-update glance format was saved as the restoration baseline' >&2; exit 1
+fi
+if grep -F 'set-option -gq @agent-radar-glance-orig-status 2' "$log" >/dev/null; then
+    echo 'pre-update reload replaced the original one-row baseline' >&2; exit 1
 fi
 
 # --- Re-source after the slot was cleared must keep that same baseline ---

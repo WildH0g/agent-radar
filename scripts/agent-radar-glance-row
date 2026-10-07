@@ -1,6 +1,9 @@
-# shellcheck shell=sh disable=SC2154 # glance_format comes from the caller
+# shellcheck shell=sh disable=SC2154 # glance_format and glance_format_prev come from the caller
 # Shared ownership rules for the glance row's status-format slot.
-# Callers set glance_format to their exact glance row format before calling these.
+# Callers set glance_format to the format they install and glance_format_prev to
+# the exact format the previous release installed for that same plugin path.
+# Only those two exact strings are this plugin's runtime state; anything else is
+# the user's.
 
 # tmux's built-in status-format[1]: the pane-size list before 3.7, the pane list from 3.7.
 agent_radar_glance_row_stock_pre37='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }'
@@ -13,17 +16,28 @@ agent_radar_glance_row_default() {
     rm -rf "$_ar_probe_dir"
 }
 
+# Succeed when status-format[$1], holding $2, is one this plugin installed:
+# the current format or the pre-update format for this plugin path.
+agent_radar_glance_row_owned() {
+    [ "$2" = "$glance_format" ] || [ "$2" = "${glance_format_prev:-}" ]
+}
+
 # Succeed when status-format[$1], holding $2, is empty, the glance, or tmux's built-in text.
 agent_radar_glance_row_free() {
     case "$2" in
-        ''|"$glance_format"|"$agent_radar_glance_row_stock_pre37"|"$agent_radar_glance_row_stock_37") return 0 ;;
+        ''|"$agent_radar_glance_row_stock_pre37"|"$agent_radar_glance_row_stock_37") return 0 ;;
     esac
+    if agent_radar_glance_row_owned "$1" "$2"; then
+        return 0
+    fi
     [ "$2" = "$(agent_radar_glance_row_default "$1")" ]
 }
 
 # Write the glance into status-format[$1], remembering its previous text $2 for release.
+# A previous-release glance is runtime state too: replacing it must not save the
+# old renderer format as the user's restoration baseline.
 agent_radar_glance_row_claim() {
-    if [ "$2" != "$glance_format" ]; then
+    if ! agent_radar_glance_row_owned "$1" "$2"; then
         tmux set-option -gq @agent-radar-glance-orig-format "$2"
     fi
     tmux set-option -g "status-format[$1]" "$glance_format"

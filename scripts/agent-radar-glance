@@ -24,6 +24,8 @@ heartbeat=$script_dir/agent-radar-heartbeat
 pidfile=$("$heartbeat" pid-file)
 # shellcheck disable=SC2034 # read by agent-radar-glance-row
 glance_format="#{@agent-radar-glance-text}#('$heartbeat' '$pidfile')"
+# shellcheck disable=SC2034 # read by agent-radar-glance-row
+glance_format_prev="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')"
 . "$script_dir/agent-radar-glance-row"
 
 # A cached #() can outlive a row change; stop if the configured row is custom.

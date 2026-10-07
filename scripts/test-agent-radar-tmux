@@ -6,7 +6,7 @@ real_tmux=$(command -v tmux) || { echo 'tmux is required' >&2; exit 1; }
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-tmux-test.XXXXXX") || exit 1
 tmp=$(CDPATH='' cd "$tmp" && pwd -P) || exit 1
 socket="agent-radar-test-${tmp##*.}"
-trap 'tmux kill-server >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT INT TERM HUP
+trap 'PATH=$tmp/bin:$PATH TMUX_TMPDIR=$tmp sh "$tmp/plugin with spaces/scripts/agent-radar-poller" stop >/dev/null 2>&1 || true; tmux kill-server >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT INT TERM HUP
 mkdir "$tmp/bin" "$tmp/plugin with spaces"
 cp "$repo_dir/agent-radar.tmux" "$tmp/plugin with spaces/agent-radar.tmux"
 cp -R "$repo_dir/scripts" "$tmp/plugin with spaces/scripts"
@@ -23,14 +23,27 @@ plugin="$tmp/plugin with spaces/agent-radar.tmux"
 toggle="$tmp/plugin with spaces/scripts/agent-radar-toggle"
 glance="$tmp/plugin with spaces/scripts/agent-radar-glance"
 tmux -f /dev/null new-session -d -s smoke
-# Keep the isolated poller start guard satisfied without starting a daemon.
-tmux set-option -gq @agent-radar-pid "$$"
 tmux set-hook -g session-window-changed 'display-message "user hook survives"'
 stock=$(tmux show-option -gqv 'status-format[1]')
 
+# Sourcing the plugin restarts the poller (so an upgrade takes effect). Wait for
+# the replacement to publish a live pid, or the next reload races a second daemon.
+load_plugin() {
+    sh "$plugin"
+    n=0
+    while [ "$n" -lt 100 ]; do
+        pid=$(tmux show-option -gqv @agent-radar-pid 2>/dev/null || true)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then return 0; fi
+        n=$((n + 1))
+        sleep 0.1
+    done
+    echo 'plugin reload did not leave a live poller' >&2
+    exit 1
+}
+
 for custom in 'custom #{pane_index}' 'custom #{pane_width}x#{pane_height}'; do
     tmux set-option -g 'status-format[1]' "$custom"
-    sh "$plugin"
+    load_plugin
     [ "$(tmux show-option -gqv 'status-format[1]')" = "$custom" ] || {
         echo 'custom row was overwritten' >&2; exit 1
     }
@@ -47,7 +60,7 @@ agent_hook_count=$(printf '%s\n' "$hook" | awk '/agent-radar-status/ { count++ }
 [ "$agent_hook_count" -eq 1 ] || { echo 'loading twice left a duplicate agent-radar hook' >&2; exit 1; }
 
 tmux set-option -g 'status-format[1]' "$stock"
-sh "$plugin"
+load_plugin
 [ "$(tmux show-option -gqv status)" = 2 ] || { echo 'glance did not claim row 2' >&2; exit 1; }
 [ "$(tmux show-option -gqv @agent-radar-glance-orig-status)" = on ] || {
     echo 'original row count was not recorded' >&2; exit 1
@@ -57,7 +70,7 @@ owned="#{@agent-radar-glance-text}#('$tmp/plugin with spaces/scripts/agent-radar
 [ "$(tmux show-option -gqv 'status-format[1]')" = "$owned" ] || {
     echo 'glance format not installed' >&2; exit 1
 }
-sh "$plugin"
+load_plugin
 [ "$(tmux show-option -gqv @agent-radar-glance-orig-status)" = on ] || {
     echo 'reload overwrote the original row count' >&2; exit 1
 }
