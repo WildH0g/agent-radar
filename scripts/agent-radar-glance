@@ -58,8 +58,8 @@ esac
 # Keep the tint across field-level #[default] resets; fill paints unused cells.
 tint_prefix="#[bg=$tint,fill=$tint]#[push-default]"
 tint_suffix='#[pop-default]'
-# 📡 takes two terminal cells; reserve 17 columns for the full label.
-if [ "$width" -gt 17 ]; then width=$((width - 17)); else width=0; fi
+# Nerd icon is one cell; reserve 16 columns for the full label.
+if [ "$width" -gt 16 ]; then width=$((width - 16)); else width=0; fi
 emit() { printf '%s%s%s%s\n' "$tint_prefix" "$label" "$1" "$tint_suffix"; }
 
 records=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-records.XXXXXX") || { emit 'cannot read agent state'; exit 0; }
