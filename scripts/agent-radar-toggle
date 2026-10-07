@@ -5,7 +5,6 @@ set -eu
 command -v tmux >/dev/null 2>&1 || exit 0
 
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 0
-glance_cmd=$script_dir/agent-radar-glance
 
 opt() {
     v=$(tmux show-option -gqv "$1" 2>/dev/null || true)
@@ -18,7 +17,9 @@ case "$glance_row" in
 esac
 glance_idx=$((glance_row - 1))
 
-glance_format="#('$glance_cmd' '#{session_name}' '#{window_width}')"
+heartbeat=$script_dir/agent-radar-heartbeat
+pidfile=$("$heartbeat" pid-file)
+glance_format="#{@agent-radar-glance-text}#('$heartbeat' '$pidfile')"
 . "$script_dir/agent-radar-glance-row"
 
 state=$(opt @agent-radar-glance-state off)

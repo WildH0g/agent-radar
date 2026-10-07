@@ -37,7 +37,9 @@ case "$glance_row" in
     ''|*[!0-9]*) glance_row=2 ;;
 esac
 glance_idx=$((glance_row - 1))
-glance_format="#('$current_dir/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')"
+heartbeat=$current_dir/scripts/agent-radar-heartbeat
+pidfile=$("$heartbeat" pid-file)
+glance_format="#{@agent-radar-glance-text}#('$heartbeat' '$pidfile')"
 . "$current_dir/scripts/agent-radar-glance-row"
 
 if [ "$glance" = on ]; then

@@ -52,7 +52,8 @@ sh "$plugin"
 [ "$(tmux show-option -gqv @agent-radar-glance-orig-status)" = on ] || {
     echo 'original row count was not recorded' >&2; exit 1
 }
-owned="#('$tmp/plugin with spaces/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')"
+owned_pid=$("$tmp/plugin with spaces/scripts/agent-radar-heartbeat" pid-file)
+owned="#{@agent-radar-glance-text}#('$tmp/plugin with spaces/scripts/agent-radar-heartbeat' '$owned_pid')"
 [ "$(tmux show-option -gqv 'status-format[1]')" = "$owned" ] || {
     echo 'glance format not installed' >&2; exit 1
 }

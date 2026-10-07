@@ -19,8 +19,14 @@ pid_val() {
     tmux show-option -gqv @agent-radar-pid 2>/dev/null || true
 }
 
+pid_file() {
+    "$script_dir/agent-radar-heartbeat" pid-file
+}
+
 pid_set() {
     tmux set-option -gq @agent-radar-pid "$1"
+    file=$(pid_file) || return 0
+    printf '%s\n' "$1" > "$file" 2>/dev/null || true
 }
 
 pid_unset() {
@@ -29,6 +35,15 @@ pid_unset() {
         return 0
     fi
     tmux set-option -gqu @agent-radar-pid 2>/dev/null || true
+    file=$(pid_file) || return 0
+    rm -f "$file"
+}
+
+# Width is unused: the terminal clips. 99999 is past any real line.
+write_glance_text() {
+    [ "$(opt @agent-radar-glance-state off)" = on ] || return 0
+    line=$("$script_dir/agent-radar-glance" '' 99999 2>/dev/null | tr -d '\n' || true)
+    tmux set-option -gq -- @agent-radar-glance-text "$line" || true
 }
 
 # Read the last_change|armed|state hot-loop fields for a pane in ONE awk pass.
@@ -203,6 +218,7 @@ EOF
     done
 
     rm -f "$present_panes" "$records_file"
+    write_glance_text || true
 }
 
 start() {
