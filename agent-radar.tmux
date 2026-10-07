@@ -49,7 +49,8 @@ if [ "$glance" = on ]; then
 
         current_status=$(tmux show-option -gqv status 2>/dev/null || true)
         orig_status=$(tmux show-option -gqv @agent-radar-glance-orig-status 2>/dev/null || true)
-        if [ "$current_slot" != "$glance_format" ] || [ -z "$orig_status" ]; then
+        # A cleared slot on reload is not a new baseline. Keep a saved one-row status.
+        if [ -z "$orig_status" ]; then
             tmux set-option -gq @agent-radar-glance-orig-status "$current_status"
         fi
         case "$current_status" in

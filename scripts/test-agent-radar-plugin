@@ -140,6 +140,18 @@ if grep -F 'set-option -gq @agent-radar-glance-orig-status 2' "$log" >/dev/null;
     echo 'reload replaced the original one-row baseline with two rows' >&2; exit 1
 fi
 
+# --- Re-source after the slot was cleared must keep that same baseline ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATUS=2 TEST_ORIG_STATUS=on \
+    TEST_SLOT='' \
+    "$repo_dir/agent-radar.tmux"
+if grep -F 'set-option -gq @agent-radar-glance-orig-status 2' "$log" >/dev/null; then
+    echo 'cleared-slot reload replaced the one-row baseline' >&2; exit 1
+fi
+grep -F "set-option -g status-format[1] $glance_owned" "$log" >/dev/null || {
+    echo 'cleared-slot reload did not reclaim the glance row' >&2; exit 1
+}
+
 # --- Reload with @agent-radar-glance off tears down an existing glance ---
 : > "$log"
 PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_GLANCE=off TEST_STATUS=2 TEST_ORIG_STATUS=on \
